@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#09090b">
+    <title>AI Movement Coach</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="sidebar" id="sidebar">
+        <div class="brand">
+            <div class="brand-icon">✦</div>
+            <div>
+                <h2>MovementCoach</h2>
+                <span>AI MOVEMENT ANALYSIS</span>
+            </div>
+        </div>
+
+        <nav class="navigation">
+            <button class="nav-item active" data-page="dashboard"><span>⌂</span><label>Dashboard</label></button>
+            <button class="nav-item" data-page="practice"><span>◉</span><label>Practice</label></button>
+            <button class="nav-item" data-page="plan"><span>◈</span><label>Fitness Plan</label></button>
+            <button class="nav-item" data-page="mistakes"><span>⚠</span><label>My Mistakes</label><b class="nav-badge" id="mistakeBadge">0</b></button>
+            <button class="nav-item" data-page="progress"><span>↗</span><label>Progress</label></button>
+        </nav>
+
+        <div class="sidebar-bottom">
+            <button class="nav-item senior-toggle-btn" id="seniorModeToggle" aria-pressed="false"><span>👓</span><label>Senior Mode</label></button>
+            <button class="nav-item" data-page="settings"><span>⚙</span><label>Settings</label></button>
+            <div class="profile-mini">
+                <div class="avatar">P</div>
+                <div><strong>Prathap</strong><small>AI Training</small></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ================= MAIN ================= -->
+    <main class="main">
+        <header class="mobile-header">
+            <button id="menuBtn" class="icon-btn">☰</button>
+            <strong>MovementCoach</strong>
+            <div class="avatar">P</div>
+        </header>
+
+        <!-- ================= DASHBOARD ================= -->
+        <section class="page active-page" id="dashboard">
+            <div class="page-header">
+                <div>
+                    <span class="eyebrow">AI MOVEMENT COACH</span>
+                    <h1>Train smarter.</h1>
+                    <p>Your phone camera measures movement on-device. After the session, Gemini reviews the recording for deeper coaching.</p>
+                </div>
+                <button class="primary-btn" data-page-target="practice">Start Training →</button>
+            </div>
+
+            <div class="hero-card">
+                <div class="hero-content">
+                    <span class="hero-label">ON-DEVICE + GEMINI</span>
+                    <h2>Your movement.<br><span>Analyzed.</span></h2>
+                    <p>Live pose, exercise recognition and form cues run on your phone. Gemini then reviews the recorded session for personalized feedback.</p>
+                    <button class="hero-btn" data-page-target="practice">Start Training →</button>
+                </div>
+                <div class="hero-visual">
+                    <div class="visual-circle circle-one"></div>
+                    <div class="visual-circle circle-two"></div>
+                    <div class="dancer-placeholder">
+                        <div class="head"></div>
+                        <div class="body"></div>
+                        <div class="arm arm-left"></div>
+                        <div class="arm arm-right"></div>
+                        <div class="leg leg-left"></div>
+                        <div class="leg leg-right"></div>
+                    </div>
+                    <div class="ai-tag"><span class="pulse"></span>AI READY</div>
+                </div>
+            </div>
+
+            <div class="section-title"><h2>Training Modes</h2></div>
+            <div class="mode-grid">
+                <button class="mode-card" data-mode="dance"><div class="mode-icon">💃</div><strong>Dance</strong><p>Compare your movement with a reference video.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="gym"><div class="mode-icon">🏋️</div><strong>Gym</strong><p>Analyze exercise posture and technique.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="yoga"><div class="mode-icon">🧘</div><strong>Yoga</strong><p>Monitor pose and body alignment.</p><span>Start →</span></button>
+            </div>
+
+            <div class="section-title"><h2>System Status</h2></div>
+            <div class="status-card">
+                <div class="status-dot" id="statusDot"></div>
+                <div><strong id="aiStatus">Checking system...</strong><span id="aiStatusText">Preparing AI services.</span></div>
+            </div>
+            <div class="ai-split-status">
+                <div class="ai-split-pill on-device"><small>ON-DEVICE AI</small><strong id="dashOnDeviceStatus">● Pose · recognition · form</strong></div>
+                <div class="ai-split-pill gemini"><small>GEMINI REVIEW</small><strong id="dashGeminiStatus">● Checking...</strong></div>
+            </div>
+        </section>
+
+        <!-- ================= PRACTICE ================= -->
+        <section class="page" id="practice">
+            <div class="page-header">
+                <div>
+                    <span class="eyebrow">TRAINING MODES</span>
+                    <h1>Choose your training</h1>
+                    <p>Select a movement category to begin.</p>
+                </div>
+            </div>
+            <div class="mode-grid">
+                <button class="mode-card" data-mode="dance"><div class="mode-icon">💃</div><strong>Dance</strong><p>Reference choreography comparison.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="gym"><div class="mode-icon">🏋️</div><strong>Gym</strong><p>Exercise posture analysis.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="yoga"><div class="mode-icon">🧘</div><strong>Yoga</strong><p>Pose and alignment analysis.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="fitness"><div class="mode-icon">⚡</div><strong>Fitness</strong><p>Movement technique feedback.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="exercise"><div class="mode-icon">🏃</div><strong>General Exercise</strong><p>General movement monitoring.</p><span>Start →</span></button>
+                <button class="mode-card" data-mode="wellness"><div class="mode-icon">♥</div><strong>Healthcare / Wellness</strong><p>Posture and movement awareness.</p><span>Start →</span></button>
+            </div>
+        </section>
+
+        <!-- ================= SETUP ================= -->
+        <section class="page" id="modeSetup">
+            <button class="back-btn" data-page-target="practice">← Back</button>
+            <div class="page-header">
+                <div>
+                    <span class="eyebrow" id="modeEyebrow">TRAINING</span>
+                    <h1 id="modeTitle">Dance</h1>
+                    <p id="modeDescription">Compare your movement with a reference.</p>
+                </div>
+            </div>
+
+            <div class="selected-mode-banner">
+                <div class="selected-mode-icon" id="selectedModeIcon">💃</div>
+                <div><small>SELECTED MODE</small><strong id="selectedModeName">Dance</strong></div>
+                <span class="local-ai-status">● AI READY</span>
+            </div>
+
+            <div class="senior-only senior-tips-card hidden" id="seniorTipsCard">
+                <div class="senior-tips-col do-col"><strong>✅ DO</strong><ul id="seniorDoList"></ul></div>
+                <div class="senior-tips-col dont-col"><strong>🚫 DON'T</strong><ul id="seniorDontList"></ul></div>
+                <div class="senior-safety-note">
+                    <strong>Safety reminders</strong>
+                    <p>Start slowly. Use a safe, clear space. Stop immediately if you feel pain, dizziness or discomfort. This app does not provide medical advice — follow guidance appropriate for your own health condition.</p>
+                </div>
+            </div>
+
+            <div class="setup-layout">
+                <div class="upload-card" id="referenceSetupCard">
+                    <div class="card-header">
+                        <div><h3>Reference Video</h3><p>Upload the teacher or choreography video you want to compare against.</p></div>
+                        <span class="required" id="referenceRequiredBadge">OPTIONAL</span>
+                    </div>
+                    <input type="file" id="videoInput" accept="video/*" hidden>
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-icon">↑</div>
+                        <h3>Upload reference video</h3>
+                        <p>MP4, WebM or MOV</p>
+                        <button class="secondary-btn" id="browseBtn">Choose Video</button>
+                    </div>
+
+                    <div class="url-divider" id="urlDivider"><span>or paste a link</span></div>
+                    <div class="url-input-row" id="urlInputRow">
+                        <input type="url" id="referenceUrlInput" placeholder="YouTube, Instagram, or direct video link (.mp4)" />
+                        <button class="secondary-btn" id="loadUrlBtn">Load</button>
+                    </div>
+                    <p class="review-hint" id="urlInputHint">Direct video links work fully, including Gemini comparison. YouTube links play for visual reference only. Instagram links are preview-only.</p>
+
+                    <div class="video-preview hidden" id="videoPreview">
+                        <video id="referenceVideo" controls playsinline></video>
+                        <div class="embed-wrap hidden" id="referenceEmbedWrap"><iframe id="referenceEmbedFrame" src="" frameborder="0" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>
+                        <div class="video-info">
+                            <div><strong id="videoName">Reference Video</strong><span id="videoDuration">Ready</span></div>
+                            <button class="remove-btn" id="removeVideo">Remove</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <div class="card-header"><div><h3>Training Settings</h3><p>Configure your camera session.</p></div></div>
+
+                    <div class="setting-group">
+                        <label>Camera</label>
+                        <div class="option-buttons">
+                            <button class="option-btn active" data-camera="front">◎ Front</button>
+                            <button class="option-btn" data-camera="back">◉ Back</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Preparation Countdown</label>
+                        <div class="option-buttons">
+                            <button class="option-btn" data-countdown="3">3 sec</button>
+                            <button class="option-btn active" data-countdown="5">5 sec</button>
+                            <button class="option-btn" data-countdown="10">10 sec</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Exercise</label>
+                        <select id="exerciseSelect">
+                            <option value="dance">Dance Movement</option>
+                            <option value="squat">Squat</option>
+                            <option value="pushup">Push-up</option>
+                            <option value="lunge">Lunge</option>
+                            <option value="bicepcurl">Bicep Curl</option>
+                            <option value="shoulderpress">Shoulder Press</option>
+                            <option value="standing">Standing Posture</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Automatic Exercise Recognition</label>
+                        <div class="option-buttons">
+                            <button class="option-btn active" data-autodetect="on">🎯 Auto-Detect</button>
+                            <button class="option-btn" data-autodetect="off">✋ Manual</button>
+                        </div>
+                        <p class="review-hint" style="padding:8px 0 0;">
+                            When on, the camera identifies squat / lunge / push-up / bicep curl / shoulder press automatically and shows a confidence score. Rep counting and form checks switch to match. Runs fully on-device.
+                        </p>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Voice Guidance Language</label>
+                        <div class="option-buttons" id="voiceLanguageButtons">
+                            <button class="option-btn active" data-voice-lang="en-IN">🇬🇧 English</button>
+                            <button class="option-btn" data-voice-lang="te-IN">🇮🇳 తెలుగు</button>
+                            <button class="option-btn" data-voice-lang="hi-IN">🇮🇳 हिंदी</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>AI Voice Coach</label>
+                        <div class="option-buttons">
+                            <button class="option-btn active" data-coach="on">🔊 On</button>
+                            <button class="option-btn" data-coach="off">🔇 Off</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Live Skeleton Tracking &amp; Real-Time Cues</label>
+                        <div class="option-buttons">
+                            <button class="option-btn active" data-pose="on">🦴 On</button>
+                            <button class="option-btn" data-pose="off">Off</button>
+                        </div>
+                        <p class="review-hint" style="padding:8px 0 0;">Draws a live skeleton over your camera and speaks short corrections while you move. Turn off if your phone feels slow.</p>
+                    </div>
+
+                    <div class="ai-info">
+                        <span class="pulse"></span>
+                        <div><strong>Two-stage AI ready</strong><small>Live coaching stays on-device. Gemini reviews the recording after you stop.</small></div>
+                    </div>
+
+                    <button class="primary-btn full-btn" id="openStudio">Open Training Camera →</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= STUDIO ================= -->
+        <section class="page" id="studio">
+            <div class="studio-header">
+                <button class="back-btn" id="studioBack">← Back</button>
+                <div class="studio-title"><span class="live-dot"></span><span id="studioModeTitle">Dance Training</span></div>
+                <div class="studio-timer" id="practiceTimer">00:00</div>
+            </div>
+
+            <div class="practice-stage">
+                <div class="stage-panel" id="referencePanel">
+                    <div class="stage-label"><span>REFERENCE</span><span id="referenceStatus">READY</span></div>
+                    <video id="studioReference" class="stage-video" controls playsinline></video>
+                    <div class="embed-wrap hidden" id="studioReferenceEmbedWrap"></div>
+                    <div class="stage-empty" id="referenceEmpty"><span>🎬</span><p>Upload a reference video</p></div>
+                </div>
+
+                <div class="stage-panel">
+                    <div class="stage-label"><span>YOUR CAMERA</span><span id="cameraStatus">READY</span></div>
+                    <video id="cameraVideo" class="stage-video mirror" autoplay muted playsinline></video>
+                    <canvas id="poseCanvas" class="stage-video pose-canvas mirror"></canvas>
+
+                    <div class="pose-status-chip" id="poseStatusChip">◎ Skeleton: Loading...</div>
+
+                    <div class="recognition-banner hidden" id="recognitionBanner">
+                        <div class="recognition-row">
+                            <span id="recognitionText">Detecting exercise...</span>
+                            <span class="recognition-status" id="recognitionStatus">SCANNING</span>
+                        </div>
+                        <div class="confidence-bar"><span id="confidenceFill"></span></div>
+                    </div>
+
+                    <div class="form-hud hidden" id="formHud">
+                        <div class="hud-metric hud-span"><span>EXERCISE</span><strong id="hudExercise">--</strong></div>
+                        <div class="hud-metric"><span>CONFIDENCE</span><strong id="hudConfidence">--</strong></div>
+                        <div class="hud-metric"><span>FORM</span><strong id="hudFormScore">--</strong></div>
+                        <div class="hud-metric"><span>REPS</span><strong id="hudReps">0</strong></div>
+                        <div class="hud-metric"><span>CORRECT</span><strong id="hudCorrectReps">0</strong></div>
+                        <div class="hud-metric"><span id="hudPrimaryLabel">JOINT</span><strong id="hudKneeAngle">--°</strong></div>
+                        <div class="hud-metric"><span>ALIGN</span><strong id="hudBackAlignment">--</strong></div>
+                        <div class="hud-cue hidden" id="hudCue">—</div>
+                    </div>
+
+                    <p class="camera-quality-hint hidden" id="cameraQualityHint"></p>
+
+                    <div class="stage-empty camera-empty" id="cameraEmpty"><span>◎</span><p>Camera Preview</p></div>
+                    <div class="camera-indicator hidden" id="recordingIndicator"><span></span>REC</div>
+                    <div class="live-feedback" id="liveFeedback">Camera ready</div>
+                </div>
+            </div>
+
+            <div class="ai-live-bar">
+                <div><span class="pulse"></span><strong>ON-DEVICE AI</strong><small id="onDeviceLiveStatus">● Active</small></div>
+                <div class="gemini-live-status"><strong>GEMINI REVIEW</strong><small id="geminiLiveStatus">● Ready</small></div>
+                <span id="liveScore">READY</span>
+            </div>
+
+            <div class="countdown-overlay hidden" id="countdownOverlay">
+                <span>GET READY</span>
+                <strong id="countdownNumber">5</strong>
+            </div>
+
+            <div class="studio-controls">
+                <button class="round-control" id="studioCameraSwitch"><span>↻</span><small>Camera</small></button>
+                <button class="round-control" id="studioPoseToggle"><span>🦴</span><small>Skeleton</small></button>
+                <button class="record-button" id="startPractice"><span></span></button>
+                <button class="round-control" id="stopPractice"><span>■</span><small>Stop</small></button>
+            </div>
+
+            <p class="studio-hint" id="studioHint">Press record when you are ready.</p>
+        </section>
+
+        <!-- ================= ANALYSIS ================= -->
+        <section class="page" id="analysis">
+            <div class="page-header">
+                <div>
+                    <span class="eyebrow">TWO-STAGE AI REVIEW</span>
+                    <h1>Training Results</h1>
+                    <p id="analysisDescription">Live on-device metrics plus Gemini session review.</p>
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="secondary-btn" id="downloadReportBtn">⬇ Download Report</button>
+                    <button class="primary-btn" id="analysisPracticeAgain">Practice Again</button>
+                </div>
+            </div>
+
+            <div class="result-hero">
+                <div class="score-ring">
+                    <svg viewBox="0 0 120 120">
+                        <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+                        <circle class="ring-progress" id="scoreRing" cx="60" cy="60" r="52"></circle>
+                    </svg>
+                    <div class="score-number"><strong id="overallScore">--</strong><span>%</span></div>
+                </div>
+                <div>
+                    <span class="eyebrow">SESSION SCORE</span>
+                    <h2 id="resultTitle">Analysis complete</h2>
+                    <p id="resultText">Your results will appear here.</p>
+                    <div class="score-split">
+                        <span>Live AI <strong id="liveScoreBadge">--</strong></span>
+                        <span>Gemini <strong id="geminiScoreBadge">--</strong></span>
+                    </div>
+
+                    <div class="voice-controls">
+                        <select id="feedbackLanguage" aria-label="Feedback language">
+                            <option value="en-IN">🇬🇧 English</option>
+                            <option value="te-IN">🇮🇳 తెలుగు</option>
+                            <option value="hi-IN">🇮🇳 हिंदी</option>
+                        </select>
+                        <button class="speak-btn" id="speakFeedback">🔊 Speak Feedback</button>
+                        <button class="speak-btn" id="playVoiceCoach">🎧 Play Voice Coaching</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-title"><h2>Session Intelligence</h2></div>
+            <div class="stats-grid" id="workoutSummaryGrid">
+                <div class="stat-card"><div class="stat-icon">◎</div><div><span>Detected</span><strong id="summaryExercise">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">↺</div><div><span>Total Reps</span><strong id="summaryReps">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">✓</div><div><span>Correct Reps</span><strong id="summaryCorrectReps">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">!</div><div><span>Corrections</span><strong id="summaryCorrections">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">◷</div><div><span>Duration</span><strong id="summaryDuration">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">★</div><div><span>Strongest</span><strong id="summaryStrongest">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">△</div><div><span>Focus next</span><strong id="summaryWeakest">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">⚠</div><div><span>Main issue</span><strong id="summaryMajorMistake">--</strong></div></div>
+            </div>
+            <p class="review-hint" id="geminiStageNote">Stage 1 is on-device (pose, reps, form). Stage 2 is Gemini cloud review of the recording.</p>
+
+            <!-- NEW: adaptive AI coach recommendation -->
+            <div class="section-title"><h2>🤖 Your AI Coach Recommendation</h2></div>
+            <div class="coach-recommendation-card" id="coachRecommendationCard">
+                <div class="empty-message">Generating your personalized recommendation...</div>
+            </div>
+
+            <div class="section-title"><h2>Performance Breakdown</h2></div>
+            <div class="breakdown-grid">
+                <div class="breakdown-card"><span>Left Side</span><strong id="leftScore">--</strong><div class="progress-bar"><span id="leftProgress"></span></div></div>
+                <div class="breakdown-card"><span>Right Side</span><strong id="rightScore">--</strong><div class="progress-bar"><span id="rightProgress"></span></div></div>
+                <div class="breakdown-card"><span>Upper Body</span><strong id="upperScore">--</strong><div class="progress-bar"><span id="upperProgress"></span></div></div>
+                <div class="breakdown-card"><span>Lower Body</span><strong id="lowerScore">--</strong><div class="progress-bar"><span id="lowerProgress"></span></div></div>
+            </div>
+
+            <div class="section-title feedback-section-title">
+                <div><h2>🔊 Mistakes &amp; AI Feedback</h2><p class="feedback-subtitle">Your AI coach explains exactly what to improve.</p></div>
+                <span id="mistakeCount">0 issues</span>
+            </div>
+            <div class="mistake-list" id="mistakeList"><div class="empty-message">No mistakes detected.</div></div>
+
+            <div class="section-title"><h2>Review Your Recording</h2></div>
+            <div class="review-video-card">
+                <video id="reviewVideo" controls playsinline></video>
+                <p class="review-hint">Click a mistake above to jump directly to that moment.</p>
+            </div>
+        </section>
+
+        <!-- ================= MISTAKES ================= -->
+        <section class="page" id="mistakes">
+            <div class="page-header"><div><span class="eyebrow">HISTORY</span><h1>My Mistakes</h1><p>Review feedback from previous sessions.</p></div></div>
+            <div class="mistake-list" id="historyMistakes"><div class="empty-message">No mistakes recorded yet.</div></div>
+        </section>
+
+        <!-- ================= FITNESS PLAN ================= -->
+        <section class="page" id="plan">
+            <div class="page-header">
+                <div>
+                    <span class="eyebrow">PERSONALIZED PLAN</span>
+                    <h1>Your Fitness Plan</h1>
+                    <p>Tell us your goal and level. The AI coach builds a simple daily and weekly plan. This is general guidance, not medical advice.</p>
+                </div>
+            </div>
+
+            <div class="setup-layout">
+                <div class="settings-card">
+                    <div class="card-header"><div><h3>Goal</h3><p>What do you mainly want to work on?</p></div></div>
+                    <div class="option-buttons wrap-buttons" id="planGoalButtons">
+                        <button class="option-btn active" data-goal="general">General Fitness</button>
+                        <button class="option-btn" data-goal="strength">Strength</button>
+                        <button class="option-btn" data-goal="flexibility">Flexibility</button>
+                        <button class="option-btn" data-goal="weight">Weight Management</button>
+                        <button class="option-btn" data-goal="activity">Daily Activity</button>
+                    </div>
+
+                    <div class="card-header" style="margin-top:20px;"><div><h3>Fitness Level</h3><p>Choose the level that fits you right now.</p></div></div>
+                    <div class="option-buttons" id="planLevelButtons">
+                        <button class="option-btn active" data-level="beginner">Beginner</button>
+                        <button class="option-btn" data-level="intermediate">Intermediate</button>
+                        <button class="option-btn" data-level="advanced">Advanced</button>
+                    </div>
+
+                    <button class="primary-btn full-btn" id="generatePlanBtn" style="margin-top:20px;">Generate My Plan →</button>
+                    <p class="review-hint" style="margin-top:10px;">AI Estimate — general fitness guidance only, not a medical program.</p>
+                </div>
+
+                <div class="upload-card">
+                    <div class="card-header"><div><h3>Your Plan</h3><p>Daily and weekly recommendations appear here.</p></div></div>
+                    <div id="planResult"><div class="empty-message">No plan generated yet. Choose a goal and level, then press "Generate My Plan".</div></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= PROGRESS ================= -->
+        <section class="page" id="progress">
+            <div class="page-header"><div><span class="eyebrow">PROGRESS</span><h1>Your Progress</h1><p>Track your training performance.</p></div></div>
+
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-icon">◈</div><div><span>Sessions</span><strong id="sessionCount">0</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">%</div><div><span>Best Score</span><strong id="bestScore">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">⚠</div><div><span>Issues</span><strong id="totalIssues">0</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">★</div><div><span>Current Mode</span><strong id="progressMode">--</strong></div></div>
+            </div>
+
+            <div class="section-title"><h2>Today vs Last Session</h2></div>
+            <div class="stats-grid" id="todayCompareGrid">
+                <div class="stat-card"><div class="stat-icon">☀</div><div><span>Today's Score</span><strong id="todayScore">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">↺</div><div><span>Previous Score</span><strong id="previousScore">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">Δ</div><div><span>Improvement</span><strong id="improvementPercent">--</strong></div></div>
+                <div class="stat-card"><div class="stat-icon">◷</div><div><span>This Week</span><strong id="weeklyCount">0</strong></div></div>
+            </div>
+
+            <div class="section-title"><h2>Weekly Activity</h2></div>
+            <div class="review-video-card">
+                <canvas id="weeklyChart" width="700" height="220" style="width:100%; height:220px;"></canvas>
+                <p class="review-hint" id="chartEmptyHint">Complete a few sessions to see your weekly score chart here.</p>
+            </div>
+
+            <div class="section-title"><h2>Nutrition History</h2></div>
+            <div class="mistake-list" id="nutritionHistoryList">
+                <div class="empty-message">No nutrition entries yet. Nutrition tracking is not part of this build — once food entries are logged, an "AI Estimate" summary will appear here.</div>
+            </div>
+
+            <div class="section-title"><h2>🏆 Achievements</h2></div>
+            <div class="stats-grid" id="achievementsGrid">
+                <div class="empty-message">Complete a session to start unlocking achievements.</div>
+            </div>
+        </section>
+
+        <!-- ================= SETTINGS ================= -->
+        <section class="page" id="settings">
+            <div class="page-header"><div><span class="eyebrow">SETTINGS</span><h1>Settings</h1><p>Configure your training experience.</p></div></div>
+
+            <div class="settings-page">
+                <div class="setting-row"><div><strong>On-device AI</strong><small>MediaPipe pose, recognition, joint angles, reps and live voice cues stay on this phone.</small></div><div class="setting-status">LOCAL</div></div>
+                <div class="setting-row"><div><strong>Gemini review</strong><small>After you stop recording, the session video is sent for deeper cloud analysis. Chat, fitness plan and adaptive recommendations also use Gemini.</small></div><div class="setting-status">CLOUD</div></div>
+                <div class="setting-row"><div><strong>Multilingual Coach</strong><small>English, Telugu and Hindi feedback.</small></div><div class="setting-status">3 LANGUAGES</div></div>
+                <div class="setting-row"><div><strong>Voice Feedback</strong><small>Browser text-to-speech reads AI corrections.</small></div><div class="setting-status">ON</div></div>
+                <div class="setting-row"><div><strong>Recording</strong><small>Practice recording remains in this browser session.</small></div><div class="setting-status">LOCAL</div></div>
+                <div class="setting-row"><div><strong>Live Skeleton Tracking</strong><small>Pose detection runs fully on-device in your browser (MediaPipe WASM) — landmark coordinates never leave your phone.</small></div><div class="setting-status">ON-DEVICE</div></div>
+                <div class="setting-row"><div><strong>Senior Mode</strong><small>Larger buttons, bigger text, simplified screens.</small></div><button class="option-btn" id="settingsSeniorToggle">Turn On</button></div>
+            </div>
+
+            <div class="section-title"><h2>Privacy &amp; Data</h2></div>
+            <div class="settings-page">
+                <div class="setting-row"><div><strong>Processed locally</strong><small>Pose tracking, skeleton overlay, joint angles, exercise recognition, rep counting and real-time form cues run in the browser. Live camera frames are not stored in localStorage.</small></div></div>
+                <div class="setting-row"><div><strong>Sent to Gemini</strong><small>The recorded session video (and optional reference video) for post-session review, plus chatbot messages, fitness-plan requests and adaptive recommendation metrics. This is not a fully offline product.</small></div></div>
+                <div class="setting-row"><div><strong>What is stored on this device</strong><small>Scores, breakdown, mistakes and session metrics stay in this browser's local storage. Temporary server uploads are deleted after analysis.</small></div></div>
+                <div class="setting-row"><div><strong>Delete analysis history</strong><small>Removes all saved scores, breakdowns and mistakes from this device.</small></div><button class="remove-btn" id="deleteHistoryBtn">Delete</button></div>
+                <div class="setting-row"><div><strong>Delete nutrition history</strong><small>Removes any saved nutrition/food-check entries from this device.</small></div><button class="remove-btn" id="deleteNutritionBtn">Delete</button></div>
+                <div class="setting-row"><div><strong>Delete saved fitness plan</strong><small>Removes your generated personalized fitness plan.</small></div><button class="remove-btn" id="deletePlanBtn">Delete</button></div>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- ================= TOAST ================= -->
+<div class="toast" id="toast"><strong>MovementCoach</strong><p id="toastMessage">Ready</p></div>
+
+<!-- ================= AI CHATBOT WIDGET ================= -->
+<button class="chat-fab" id="chatFab" aria-label="Open AI Coach chat">💬</button>
+<div class="chat-panel hidden" id="chatPanel">
+    <div class="chat-panel-header"><strong>AI Coach Chat</strong><button class="icon-btn" id="chatCloseBtn">✕</button></div>
+    <div class="chat-messages" id="chatMessages">
+        <div class="chat-bubble chat-bot">Hi! Ask me about your training, form tips, or how to use the app — I can also see your latest workout stats. You can type or use the mic.</div>
+    </div>
+    <div class="chat-input-row">
+        <button class="icon-btn" id="chatMicBtn" title="Speak your question">🎤</button>
+        <input type="text" id="chatInput" placeholder="Ask the AI coach..." />
+        <button class="primary-btn" id="chatSendBtn">Send</button>
+    </div>
+</div>
+
+<script type="module" src="script.js"></script>
+</body>
+</html>
