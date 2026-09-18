@@ -2,7 +2,12 @@
    AI MOVEMENT COACH — FRONTEND CONTROLLER
    (original app logic preserved; NEW sections are marked)
 ========================================================= */
-
+/* =========================================================
+   BACKEND CONFIG
+   Frontend is hosted on Vercel.
+   Backend is hosted on Render.
+========================================================= */
+const BACKEND_URL = "https://movement-detector-ai.onrender.com";
 const state = {
     currentPage: "dashboard",
     previousPage: "practice",
@@ -2703,7 +2708,7 @@ async function runAnalysis() {
         formData.append("duration", String(Math.round(state.currentSession.duration || 0)));
         formData.append("jointMetrics", metrics.jointMetrics ? JSON.stringify(metrics.jointMetrics) : "");
 
-        const response = await fetch("/api/analyze", { method: "POST", body: formData });
+        const response = await fetch(`${BACKEND_URL}/api/analyze`, { method: "POST", body: formData });
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -2728,7 +2733,6 @@ async function runAnalysis() {
         showToast("AI analysis failed. Check server.");
     }
 }
-
 
 /* =========================================================
    NORMALIZE RESULT
@@ -3315,7 +3319,7 @@ async function generateFitnessPlan() {
     resultEl.innerHTML = `<div class="empty-message">🤖 Building your personalized plan...</div>`;
 
     try {
-        const response = await fetch("/api/fitness-plan", {
+        const response = await fetch(`${BACKEND_URL}/api/fitness-plan`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3425,7 +3429,7 @@ async function fetchCoachRecommendation(session) {
     } : null;
 
     try {
-        const response = await fetch("/api/coach-recommendation", {
+        const response = await fetch(`${BACKEND_URL}/api/coach-recommendation`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3600,7 +3604,7 @@ async function sendChatMessage() {
     const thinkingBubble = appendChatBubble("Thinking...", "chat-bot");
 
     try {
-        const response = await fetch("/api/chat", {
+        const response = await fetch(`${BACKEND_URL}/api/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -4012,32 +4016,67 @@ function practiceAgain() {
 
 
 /* =========================================================
-   BACKEND CHECK
+   BACKEND HEALTH CHECK
+   Frontend: Vercel
+   Backend: Render
 ========================================================= */
 
 async function checkBackend() {
     try {
-        const response = await fetch("/api/health");
-        if (!response.ok) throw new Error("Backend unavailable");
+        console.log(
+            "[MovementCoach] Checking backend:",
+            `${BACKEND_URL}/api/health`
+        );
+
+        const response = await fetch(
+            `${BACKEND_URL}/api/health`,
+            {
+                method: "GET",
+                cache: "no-store"
+            }
+        );
+
+        console.log(
+            "[MovementCoach] Backend HTTP status:",
+            response.status
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Backend returned HTTP ${response.status}`
+            );
+        }
 
         const data = await response.json();
 
-        $("aiStatus").textContent = "AI Coach Ready";
-        $("aiStatusText").textContent = data.message || "Gemini backend is connected.";
-        $("statusDot").classList.add("ready");
+        console.log(
+            "[MovementCoach] Backend response:",
+            data
+        );
 
-        /* ---- NEW: reflect real Gemini configuration state, not a
-           hardcoded "Checking..." label ---- */
-        state.geminiAvailable = Boolean(data.success);
-        const geminiConfigured = !String(data.message || "").toLowerCase().includes("missing");
-        setGeminiStatusPills(geminiConfigured ? "● Ready" : "● Not configured");
+        if (
+            data &&
+            data.success === true
+        ) {
+            console.log(
+                "[MovementCoach] Backend check: OK"
+            );
+
+            return true;
+        }
+
+        throw new Error(
+            "Backend health response was invalid"
+        );
 
     } catch (error) {
-        console.warn("Backend check failed:", error);
-        $("aiStatus").textContent = "Backend Offline";
-        $("aiStatusText").textContent = "Start server.js to enable AI analysis.";
-        state.geminiAvailable = false;
-        setGeminiStatusPills("● Offline");
+
+        console.error(
+            "[MovementCoach] Backend check failed:",
+            error
+        );
+
+        return false;
     }
 }
 
