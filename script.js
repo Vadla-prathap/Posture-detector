@@ -1,4 +1,3 @@
-const API_BASE_URL = "https://posture-detector-sgzc.onrender.com";
 /* =========================================================
    AI MOVEMENT COACH — FRONTEND CONTROLLER
    (original app logic preserved; NEW sections are marked)
@@ -291,7 +290,6 @@ const LIVE_CUE_I18N = {
     "Keep your left elbow tucked in close to your body.": { te: "ఎడమ మోచేయి శరీరానికి దగ్గరగా ఉంచండి.", hi: "बाएं एल्बो को शरीर के पास रखें।" },
     "Keep your right elbow tucked in close to your body.": { te: "కుడి మోచేయి శరీరానికి దగ్గరగా ఉంచండి.", hi: "दाएं एल्बो को शरीर के पास रखें।" },
     "Avoid arching your back — keep your core engaged.": { te: "వీపు వంచకుండా కోర్‌ను బిగించండి.", hi: "पीठ न झुकाएं, कोर टाइट रखें।" },
-    "Please stand in front of camera and follow the reference video.": { te: "దయచేసి కెమెరా mundhu నిలబడండి రిఫరెన్స్ వీడియోను అనుసరించండి.", hi: "कृपया कैमरे के पीछे खड़े हों और संदर्भ वीडियो का पालन करें।" },
     "Keep your shoulders aligned.": { te: "భుజాలను సమానంగా ఉంచండి.", hi: "कंधों को संतुलित रखें।" },
     "Keep your shoulders level.": { te: "భుజాలు సమాంతరంగా ఉంచండి.", hi: "कंधे एक स्तर पर रखें।" },
     "Keep your head aligned over your shoulders.": { te: "తలను భుజాలపై సమం చేయండి.", hi: "सिर को कंधों के ऊपर संरेखित रखें।" },
@@ -2705,7 +2703,7 @@ async function runAnalysis() {
         formData.append("duration", String(Math.round(state.currentSession.duration || 0)));
         formData.append("jointMetrics", metrics.jointMetrics ? JSON.stringify(metrics.jointMetrics) : "");
 
-        const response = await fetch(`${API_BASE_URL}/api/analyze`, { method: "POST", body: formData });
+        const response = await fetch("/api/analyze", { method: "POST", body: formData });
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -3317,7 +3315,7 @@ async function generateFitnessPlan() {
     resultEl.innerHTML = `<div class="empty-message">🤖 Building your personalized plan...</div>`;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/fitness-plan`, {
+        const response = await fetch("/api/fitness-plan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3427,7 +3425,7 @@ async function fetchCoachRecommendation(session) {
     } : null;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/coach-recommendation`, {
+        const response = await fetch("/api/coach-recommendation", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3602,7 +3600,7 @@ async function sendChatMessage() {
     const thinkingBubble = appendChatBubble("Thinking...", "chat-bot");
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        const response = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -4019,7 +4017,7 @@ function practiceAgain() {
 
 async function checkBackend() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/health`);
+        const response = await fetch("/api/health");
         if (!response.ok) throw new Error("Backend unavailable");
 
         const data = await response.json();

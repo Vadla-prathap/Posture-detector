@@ -1,4 +1,4 @@
-const API_BASE_URL = "https://movement-coach-ai-3.onrender.com";
+  const API_BASE_URL = "https://movement-coach-ai-3.onrender.com";
 /* =========================================================
    AI MOVEMENT COACH — FRONTEND CONTROLLER
    (original app logic preserved; NEW sections are marked)
@@ -2705,7 +2705,7 @@ async function runAnalysis() {
         formData.append("duration", String(Math.round(state.currentSession.duration || 0)));
         formData.append("jointMetrics", metrics.jointMetrics ? JSON.stringify(metrics.jointMetrics) : "");
 
-        const response = await fetch("/api/analyze", { method: "POST", body: formData });
+        const response = await fetch(`${API_BASE_URL}/api/analyze`, { method: "POST", body: formData });
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -3317,7 +3317,7 @@ async function generateFitnessPlan() {
     resultEl.innerHTML = `<div class="empty-message">🤖 Building your personalized plan...</div>`;
 
     try {
-        const response = await fetch("/api/fitness-plan", {
+        const response = await fetch(`${API_BASE_URL}/api/fitness-plan`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3427,7 +3427,7 @@ async function fetchCoachRecommendation(session) {
     } : null;
 
     try {
-        const response = await fetch("/api/coach-recommendation", {
+        const response = await fetch(`${API_BASE_URL}/api/coach-recommendation`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3602,7 +3602,7 @@ async function sendChatMessage() {
     const thinkingBubble = appendChatBubble("Thinking...", "chat-bot");
 
     try {
-        const response = await fetch("/api/chat", {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
