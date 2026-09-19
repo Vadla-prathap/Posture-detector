@@ -1,13 +1,9 @@
+const API_BASE_URL = "https://movement-detector-ai.onrender.com";
 /* =========================================================
    AI MOVEMENT COACH — FRONTEND CONTROLLER
    (original app logic preserved; NEW sections are marked)
 ========================================================= */
-/* =========================================================
-   BACKEND CONFIG
-   Frontend is hosted on Vercel.
-   Backend is hosted on Render.
-========================================================= */
-const BACKEND_URL = "https://movement-detector-ai.onrender.com";
+
 const state = {
     currentPage: "dashboard",
     previousPage: "practice",
@@ -22,17 +18,19 @@ const state = {
     recordingURL: null,
     referenceURL: null,
     referenceFile: null,
-    /* ---- NEW: reference video can now come from a pasted link, not
+    /* ---- reference video can now come from a pasted link, not
        just a file upload. sourceType tracks which playback path is
        active so every downstream function (studio preview, recording
        sync, Gemini upload) knows how to handle it. ---- */
     referenceSourceType: "file", // "file" | "url" | "youtube" | "instagram"
     youtubeVideoId: null,
     studioYoutubePlayer: null,
+    referenceDuration: null,
 
     isRecording: false,
     isCountingDown: false,
     practiceStartTime: null,
+    recordStartPerfTime: null,
     timerInterval: null,
     countdownTimer: null,
 
@@ -63,14 +61,15 @@ const state = {
 
     poseEnabled: true,
 
-    /* ---- NEW: automatic exercise recognition ---- */
+    /* ---- automatic exercise recognition ---- */
     autoDetectEnabled: true,
     detectedExercise: null,
     detectionConfidence: 0,
     activeExercise: null,
     geminiAvailable: null,
+    lastGeminiFailureReason: null,
 
-    /* ---- NEW: rep counting / form scoring for the current set ---- */
+    /* ---- rep counting / form scoring for the current set ---- */
     sessionMetrics: {
         reps: 0,
         correctReps: 0,
@@ -81,8 +80,25 @@ const state = {
         recognitionConfidence: 0
     },
 
-    /* ---- NEW: achievements (gamification) ---- */
-    achievements: []
+    /* ---- achievements (gamification) ---- */
+    achievements: [],
+
+    /* =====================================================
+       NEW — Feature 2/5/6/7: on-device reference comparison
+       userAngleTimeline: samples collected LIVE while recording
+       referenceAngleTimeline: samples extracted from the reference
+       video (only for "file"/"url" reference types — YouTube and
+       Instagram cannot be fed to MediaPipe from the browser).
+    ===================================================== */
+    userAngleTimeline: [],
+    referenceAngleTimeline: [],
+    referenceAnalysisStatus: "idle", // idle | analyzing | ready | unavailable
+    referenceAnalysisReason: "",
+    lastComparisonSampleTime: 0,
+
+    /* NEW — Feature 8: Judge Demo Mode */
+    demoModeActive: false,
+    demoStepsDone: {}
 };
 
 
@@ -116,7 +132,7 @@ const poseEngine = {
     lastCueMessage: "",
     lastCueTime: -Infinity,
     cueCooldowns: {},
-    /* NEW: rolling buffer of computed joint angles used for exercise recognition */
+    /* rolling buffer of computed joint angles used for exercise recognition */
     angleBuffer: [],
     lastClassifyTime: 0,
     drawingUtils: null,
@@ -146,12 +162,15 @@ const HUD_UPDATE_INTERVAL_MS = 140;
 const REP_COOLDOWN_MS = 480;
 const FORM_SMOOTH = 0.28;
 
+/* NEW: how often (ms) we snapshot the full angle set for the reference
+   comparison engine while recording. Separate from the faster HUD/rep
+   detection loop above — this only needs to be dense enough to catch
+   sustained errors, not every single frame. */
+const COMPARISON_SAMPLE_INTERVAL_MS = 150;
+
 
 /* =========================================================
-   NEW: REP COUNTING CONFIG (per recognized/selected exercise)
-   direction "decrease": rep starts at rest (high metric value),
-   dips below activeThreshold, returns above restThreshold.
-   direction "increase": inverse (used for overhead presses).
+   REP COUNTING CONFIG (per recognized/selected exercise)
 ========================================================= */
 
 const REP_CONFIG = {
@@ -217,15 +236,6 @@ const repState = {
     formOkDuringRep: true
 };
 
-/* =========================================================
-   NEW: REP COUNTING STATE MACHINE
-   Now enforces cfg.minRange (it was defined per-exercise but
-   never actually read before) — a rep only counts if the
-   tracked joint travelled far enough between the rest baseline
-   and the deepest/highest point reached, so a small, noisy
-   wobble around the threshold can no longer register as a rep.
-========================================================= */
-
 function updateRepCounting(exercise, angles, now) {
     const cfg = REP_CONFIG[exercise];
     if (!cfg) return null;
@@ -254,7 +264,6 @@ function updateRepCounting(exercise, angles, now) {
     }
 
     if (repState.phase === "active") {
-        // Track the deepest/highest point reached during this rep attempt.
         repState.extremum = cfg.direction === "decrease"
             ? Math.min(repState.extremum ?? value, value)
             : Math.max(repState.extremum ?? value, value);
@@ -266,8 +275,6 @@ function updateRepCounting(exercise, angles, now) {
             const range = Math.abs(cfg.restThreshold - repState.extremum);
 
             if (range < cfg.minRange) {
-                // Didn't travel far enough to count as a genuine rep —
-                // likely noise or an incomplete movement. Don't count it.
                 repState.extremum = null;
                 return { repCompleted: false, tooShallow: true };
             }
@@ -295,6 +302,7 @@ const LIVE_CUE_I18N = {
     "Keep your left elbow tucked in close to your body.": { te: "ఎడమ మోచేయి శరీరానికి దగ్గరగా ఉంచండి.", hi: "बाएं एल्बो को शरीर के पास रखें।" },
     "Keep your right elbow tucked in close to your body.": { te: "కుడి మోచేయి శరీరానికి దగ్గరగా ఉంచండి.", hi: "दाएं एल्बो को शरीर के पास रखें।" },
     "Avoid arching your back — keep your core engaged.": { te: "వీపు వంచకుండా కోర్‌ను బిగించండి.", hi: "पीठ न झुकाएं, कोर टाइट रखें।" },
+    "Please stand in front of camera and follow the reference video.": { te: "దయచేసి కెమెరా mundhu నిలబడండి రిఫరెన్స్ వీడియోను అనుసరించండి.", hi: "कृपया कैमरे के पीछे खड़े हों और संदर्भ वीडियो का पालन करें।" },
     "Keep your shoulders aligned.": { te: "భుజాలను సమానంగా ఉంచండి.", hi: "कंधों को संतुलित रखें।" },
     "Keep your shoulders level.": { te: "భుజాలు సమాంతరంగా ఉంచండి.", hi: "कंधे एक स्तर पर रखें।" },
     "Keep your head aligned over your shoulders.": { te: "తలను భుజాలపై సమం చేయండి.", hi: "सिर को कंधों के ऊपर संरेखित रखें।" },
@@ -314,14 +322,7 @@ function localizeCue(message) {
 
 
 /* =========================================================
-   NEW: UI PHRASE TRANSLATIONS
-   Covers the client-built voice/summary sentences that are NOT
-   part of Gemini's own multilingual JSON response (session-score
-   narration, the short post-analysis spoken summary, and the
-   offline fallback used only if the coach-recommendation network
-   call itself fails). These were previously hardcoded English
-   strings just tagged with a different TTS "lang" attribute —
-   the language selector had no effect on the actual words spoken.
+   UI PHRASE TRANSLATIONS
 ========================================================= */
 
 const UI_PHRASES = {
@@ -453,14 +454,7 @@ const $$ = selector => document.querySelectorAll(selector);
 
 document.addEventListener("DOMContentLoaded", () => {
 
-    /* ---- VERSION STAMP: if you don't see this exact line in your
-       browser console when the page loads, your browser is running
-       a CACHED copy of the old script.js, not the file you just
-       replaced. That would explain every fix appearing to "not work" —
-       the new code was never actually running. Hard-refresh (Ctrl+Shift+R
-       on Windows/Linux, Cmd+Shift+R on Mac) or open DevTools → Network
-       tab → check "Disable cache" while testing. ---- */
-    console.log("%c[MovementCoach] script.js BUILD 2024-skeleton-scale-fix loaded at " + new Date().toLocaleTimeString(), "background:#7c3aed;color:#fff;padding:4px 8px;border-radius:4px;font-weight:bold;");
+    console.log("%c[MovementCoach] script.js BUILD hackathon-upgrade-1 loaded at " + new Date().toLocaleTimeString(), "background:#7c3aed;color:#fff;padding:4px 8px;border-radius:4px;font-weight:bold;");
 
     loadHistory();
     loadSeniorMode();
@@ -481,10 +475,14 @@ document.addEventListener("DOMContentLoaded", () => {
     setupPrivacyControls();
     setupChatWidget();
     setupReportDownload();
+    setupDiagnosticsPanel();   // NEW — Feature 20
+    setupJudgeDemoMode();      // NEW — Feature 8
+    setupGeminiRetry();        // NEW — Feature 12
 
     updateProgressUI();
     updateMistakeBadge();
     checkBackend();
+    updateDeviceAiPanel();     // NEW — Feature 10
 
     showPage("dashboard");
 });
@@ -530,6 +528,7 @@ function showPage(page) {
 
     if (page === "progress") updateProgressUI();
     if (page === "mistakes") renderHistoryMistakes();
+    if (page === "settings") refreshDiagnostics();
 }
 
 
@@ -580,8 +579,26 @@ function selectMode(mode) {
         badge.classList.toggle("optional-badge", !required);
     }
 
+    /* ---- NEW: Feature 1 — Dance Compare Mode step indicator ---- */
+    const stepsBar = $("compareStepsBar");
+    if (stepsBar) {
+        stepsBar.classList.toggle("hidden", mode !== "dance");
+        if (mode === "dance") setCompareStep(state.referenceURL ? 2 : 1);
+    }
+
     renderSeniorTips(data);
     showPage("modeSetup");
+}
+
+/* ---- NEW: Feature 1 — step indicator state machine.
+   1 = choosing reference, 2 = ready to perform, 3 = AI compare done. ---- */
+function setCompareStep(activeStep) {
+    [1, 2, 3].forEach(n => {
+        const el = $(`compareStep${n}`);
+        if (!el) return;
+        el.classList.toggle("current", n === activeStep);
+        el.classList.toggle("done", n < activeStep);
+    });
 }
 
 
@@ -648,6 +665,7 @@ function setupSetupControls() {
             $$("[data-coach]").forEach(btn => btn.classList.remove("active"));
             button.classList.add("active");
             state.coachEnabled = button.dataset.coach === "on";
+            updateDeviceAiPanel();
         });
     });
 
@@ -659,7 +677,7 @@ function setupSetupControls() {
         });
     });
 
-    /* ---- NEW: automatic exercise recognition toggle ---- */
+    /* automatic exercise recognition toggle */
     $$("[data-autodetect]").forEach(button => {
         button.addEventListener("click", () => {
             $$("[data-autodetect]").forEach(btn => btn.classList.remove("active"));
@@ -688,6 +706,7 @@ function handleReferenceVideo(file) {
 
     if (state.referenceURL && state.referenceSourceType === "file") URL.revokeObjectURL(state.referenceURL);
     resetReferenceEmbeds();
+    resetReferenceAnalysisState();
 
     state.referenceFile = file;
     state.referenceURL = URL.createObjectURL(file);
@@ -705,27 +724,20 @@ function handleReferenceVideo(file) {
     video.addEventListener("loadedmetadata", updateReferenceDuration, { once: true });
     if ($("referenceUrlInput")) $("referenceUrlInput").value = "";
     showToast("Reference video loaded.");
+
+    if (state.selectedMode === "dance") setCompareStep(2);
+    markDemoStep("reference");
 }
 
 function updateReferenceDuration() {
     const video = $("referenceVideo");
-    $("videoDuration").textContent = Number.isFinite(video.duration) ? formatTime(video.duration) : "Ready";
+    const duration = Number.isFinite(video.duration) ? video.duration : null;
+    state.referenceDuration = duration;
+    $("videoDuration").textContent = duration != null ? formatTime(duration) : "Ready";
 }
 
 /* =========================================================
-   NEW: REFERENCE VIDEO BY LINK (YouTube / Instagram / direct URL)
-   Browsers cannot play a YouTube or Instagram page URL through a
-   native <video> tag — those platforms only allow playback through
-   their own embed players, and neither exposes a way to download
-   the underlying file (Instagram has no public playback-control API
-   at all; scraping YouTube's stream violates its ToS and breaks
-   constantly). So this is built honestly in three tiers:
-     - direct video file URL (.mp4 etc.)  -> full support, identical
-       to file upload, including Gemini comparison (fetched server-side)
-     - YouTube link                       -> embedded + controllable
-       for live visual reference only; NOT sent to Gemini
-     - Instagram link                     -> preview embed only, no
-       playback control, NOT sent to Gemini
+   REFERENCE VIDEO BY LINK (YouTube / Instagram / direct URL)
 ========================================================= */
 
 const YOUTUBE_URL_RE = /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i;
@@ -749,8 +761,6 @@ function classifyReferenceUrl(rawUrl) {
 
     if (DIRECT_VIDEO_RE.test(url.pathname)) return { type: "direct", url: rawUrl.trim() };
 
-    // Unknown host/path shape — still allow it as a best-effort direct link,
-    // since some CDNs serve video without a file-extension in the path.
     return { type: "direct", url: rawUrl.trim() };
 }
 
@@ -788,13 +798,12 @@ function loadReferenceFromUrl(rawUrl) {
         return;
     }
 
-    // Clear any existing file-based reference first (this REPLACES the
-    // current reference, it doesn't stack with file upload).
     if (state.referenceURL && state.referenceSourceType === "file") {
         URL.revokeObjectURL(state.referenceURL);
     }
     state.referenceFile = null;
     resetReferenceEmbeds();
+    resetReferenceAnalysisState();
 
     if (classified.type === "youtube") {
         state.referenceSourceType = "youtube";
@@ -808,10 +817,10 @@ function loadReferenceFromUrl(rawUrl) {
         embedWrap.classList.remove("hidden");
 
         $("videoName").textContent = "YouTube reference";
-        $("videoDuration").textContent = "Preview only \u2014 not sent to Gemini";
+        $("videoDuration").textContent = "Preview only \u2014 not sent to Gemini or on-device comparison";
         $("uploadZone").classList.add("hidden");
         $("videoPreview").classList.remove("hidden");
-        showToast("YouTube reference loaded. It will play during practice but won't be included in the Gemini comparison.");
+        showToast("YouTube reference loaded. It will play during practice but can't be used for Gemini or on-device joint comparison (YouTube blocks frame access).");
 
     } else if (classified.type === "instagram") {
         state.referenceSourceType = "instagram";
@@ -821,9 +830,6 @@ function loadReferenceFromUrl(rawUrl) {
         $("referenceVideo").classList.add("hidden");
         const embedWrap = $("referenceEmbedWrap");
         const embedFrame = $("referenceEmbedFrame");
-        // Instagram has no public embeddable player URL without their
-        // widget script + approval; show a clear, honest message instead
-        // of a broken iframe.
         embedFrame.src = "";
         embedWrap.classList.add("hidden");
 
@@ -831,10 +837,9 @@ function loadReferenceFromUrl(rawUrl) {
         $("videoDuration").textContent = "Link saved \u2014 preview unavailable";
         $("uploadZone").classList.add("hidden");
         $("videoPreview").classList.remove("hidden");
-        showToast("Instagram links can't be embedded or auto-played in-browser. The link is saved for your own reference, but won't play here or reach Gemini \u2014 consider downloading the clip and uploading it as a file instead.");
+        showToast("Instagram links can't be embedded or auto-played in-browser. The link is saved for your own reference, but won't play here or reach Gemini/on-device comparison \u2014 consider downloading the clip and uploading it as a file instead.");
 
     } else {
-        // Direct video file URL — behaves exactly like a file upload.
         state.referenceSourceType = "url";
         state.referenceURL = classified.url;
         state.youtubeVideoId = null;
@@ -854,6 +859,8 @@ function loadReferenceFromUrl(rawUrl) {
     }
 
     if ($("referenceUrlInput")) $("referenceUrlInput").value = "";
+    if (state.selectedMode === "dance") setCompareStep(2);
+    markDemoStep("reference");
 }
 
 function removeReferenceVideo() {
@@ -870,14 +877,26 @@ function removeReferenceVideo() {
     state.referenceFile = null;
     state.referenceSourceType = "file";
     state.youtubeVideoId = null;
+    state.referenceDuration = null;
 
     resetReferenceEmbeds();
+    resetReferenceAnalysisState();
 
     $("videoInput").value = "";
     if ($("referenceUrlInput")) $("referenceUrlInput").value = "";
     $("videoPreview").classList.add("hidden");
     $("uploadZone").classList.remove("hidden");
     showToast("Reference video removed.");
+
+    if (state.selectedMode === "dance") setCompareStep(1);
+}
+
+/* NEW: reset everything related to the on-device reference comparison
+   engine whenever the reference video itself changes. */
+function resetReferenceAnalysisState() {
+    state.referenceAngleTimeline = [];
+    state.referenceAnalysisStatus = "idle";
+    state.referenceAnalysisReason = "";
 }
 
 
@@ -901,6 +920,7 @@ async function openStudio() {
         const hero = document.querySelector(".practice-stage");
         hero?.classList.toggle("camera-hero", !state.referenceURL);
         $("referencePanel")?.classList.toggle("hidden", !state.referenceURL);
+        markDemoStep("camera");
     } catch (error) {
         console.error(error);
         const denied = error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError";
@@ -911,6 +931,7 @@ async function openStudio() {
         $("liveFeedback").textContent = denied
             ? "Camera blocked — allow camera access and reopen training."
             : "Camera unavailable.";
+        updateDeviceAiPanel();
     }
 }
 
@@ -940,15 +961,6 @@ async function startCamera() {
     cameraVideo.muted = true;
     await cameraVideo.play();
 
-    /* ---- FIX: the "mirror" class (CSS scaleX(-1)) was hardcoded in the
-       HTML on both the camera video AND the pose canvas, so the REAR
-       camera was also flipped — showing the world backwards, unlike a
-       normal phone camera. A mirror only makes sense for the FRONT
-       (selfie) camera, where users expect to see themselves as in a
-       mirror. The back camera should show the world exactly as the lens
-       sees it. Both the video and the skeleton-overlay canvas must be
-       toggled together, or the skeleton would visually misalign with
-       the person's body whenever mirroring differs between the two. ---- */
     const shouldMirror = state.selectedCamera !== "back";
     const poseCanvasEl = $("poseCanvas");
     cameraVideo.classList.toggle("mirror", shouldMirror);
@@ -957,6 +969,8 @@ async function startCamera() {
     $("cameraEmpty").classList.add("hidden");
     $("cameraStatus").textContent = "READY";
     $("liveFeedback").textContent = "Camera ready — press record.";
+
+    updateDeviceAiPanel();
 
     startPoseTracking().catch(error => console.warn("Live pose tracking did not start:", error));
 }
@@ -1007,10 +1021,6 @@ async function ensurePoseLandmarker() {
     setPoseStatus("loading", "◎ Skeleton: Loading...");
     console.log("[MovementCoach] Pose pipeline: starting MediaPipe load...");
 
-    /* ---- NEW: watchdog — if this hangs (e.g. a CDN request that never
-       resolves or rejects, rather than cleanly failing) for more than
-       8s, surface it loudly instead of leaving the user staring at a
-       silent "Loading..." chip forever with no explanation. ---- */
     const watchdogId = setTimeout(() => {
         if (!poseEngine.landmarker && !poseEngine.failed) {
             console.error("[MovementCoach] Pose pipeline: still not ready after 8s — likely a blocked/slow network request to cdn.jsdelivr.net or storage.googleapis.com.");
@@ -1052,6 +1062,8 @@ async function ensurePoseLandmarker() {
         setOnDeviceStatus("● Active");
         setPoseStatus("ready", "🦴 Skeleton: Ready");
         console.log("[MovementCoach] Pose pipeline: READY. Landmarker created successfully.");
+        updateDeviceAiPanel();
+        markDemoStep("skeleton");
         return landmarker;
 
     } catch (error) {
@@ -1060,11 +1072,8 @@ async function ensurePoseLandmarker() {
         poseEngine.failed = true;
         setOnDeviceStatus("● Unavailable");
         setPoseStatus("error", "Skeleton unavailable — see console for exact error");
-        /* ---- surface this failure visibly, not just in the console —
-           the small status chip is easy to miss, and this is the #1
-           reason skeleton/voice appear to "not work": the MediaPipe
-           CDN or model file couldn't be reached. ---- */
         showToast("Skeleton tracking failed to load — check your internet connection (MediaPipe loads from a CDN) and reload.");
+        updateDeviceAiPanel();
         return null;
     } finally {
         poseEngine.loading = false;
@@ -1081,14 +1090,6 @@ function setPoseStatus(kind, text) {
     else if (kind === "error") chip.classList.add("error");
 }
 
-/* ---- FIX: setOnDeviceStatus was called in 3 places but never
-   defined anywhere in the file — a ReferenceError that crashed
-   ensurePoseLandmarker() immediately AFTER MediaPipe successfully
-   loaded, right as it tried to report success. This is the actual
-   root cause of the skeleton never appearing: the model loaded
-   fine, then this crash aborted everything before the detection
-   loop could ever start. This bug was already present in the
-   original codebase before any of my changes. ---- */
 function setOnDeviceStatus(text) {
     const dash = $("dashOnDeviceStatus");
     const live = $("onDeviceLiveStatus");
@@ -1189,22 +1190,12 @@ function poseDetectionLoop() {
 
     poseEngine.noPoseFrames = 0;
 
-    /* ---- NEW: camera / pose quality guidance (Feature 13) ----
-       Only warns when actual visibility conditions justify it —
-       driven by MediaPipe's per-landmark visibility score, not a
-       random timer. ---- */
     showCameraQualityHint(assessPoseQuality(landmarks));
 
-    /* ---- NEW: compute joint angles for this frame ---- */
     const angles = computeFrameAngles(landmarks);
 
     pushAngleSample(angles, now);
 
-    /* ---- NEW: automatic exercise recognition, with hysteresis ----
-       classifyExercise() gives a raw per-tick guess; the code below
-       is what actually stabilizes it using poseEngine.recognition
-       and the RECOGNITION_* constants (both existed before but were
-       unused — recognition was flipping on every noisy frame). ---- */
     if (state.autoDetectEnabled && modeData[state.selectedMode]?.trackable !== false) {
 
         if (now - poseEngine.lastClassifyTime > CLASSIFY_INTERVAL_MS) {
@@ -1220,9 +1211,11 @@ function poseDetectionLoop() {
 
             if (activeExercise) {
                 updateRecognitionBanner(activeExercise, displayConfidence, null);
+                markDemoStep("recognition");
             } else {
                 updateRecognitionBanner(null, displayConfidence, guidance);
             }
+            updateDeviceAiPanel();
         }
 
     } else {
@@ -1231,7 +1224,6 @@ function poseDetectionLoop() {
         hideRecognitionBanner();
     }
 
-    /* ---- NEW: rep counting + form scoring while recording ---- */
     let repResult = null;
     if (state.isRecording) {
 
@@ -1249,12 +1241,6 @@ function poseDetectionLoop() {
         const formScore = computeFormScore(state.activeExercise, angles);
         if (formScore != null) state.sessionMetrics.formScoreSamples.push(formScore);
 
-        /* ---- NEW: this is what Feature 5 (multimodal Gemini analysis)
-           actually needs — a compact per-frame snapshot of the joint
-           angles and recognition confidence collected WHILE recording,
-           so it can be summarized and sent to Gemini as supporting
-           sensor evidence alongside the video, instead of Gemini only
-           ever seeing raw pixels. ---- */
         state.sessionMetrics.jointSamples.push({
             knee: angles.kneeAvg,
             elbow: angles.elbowAvg,
@@ -1262,21 +1248,19 @@ function poseDetectionLoop() {
         });
         state.sessionMetrics.confidenceSamples.push(state.detectionConfidence || 0);
 
+        /* ---- NEW: Feature 2/5 — push a full angle snapshot for the
+           on-device reference-comparison engine (throttled separately
+           from the rep/HUD sampling above). ---- */
+        pushUserComparisonSample(angles, now);
+
         updateFormHud(state.activeExercise, formScore, angles);
     }
 
-    /* ---- existing: live spoken coaching cues ---- */
     if (state.coachEnabled) {
         const cue = evaluateLiveCues(landmarks, angles, now, state.activeExercise);
         if (cue) {
-            // A correction always takes priority over praise this frame.
             maybeSpeakLiveCue(cue, now);
         } else if (repResult && repResult.repCompleted && repResult.correct) {
-            // NEW: positive reinforcement — "Good rep." existed in the
-            // translation dictionary but was never actually spoken
-            // anywhere. Only fires when there's no active correction
-            // needed this frame, and still respects the same cooldown
-            // logic as corrections (won't spam every single good rep).
             maybeSpeakLiveCue("Good rep.", now);
         }
     }
@@ -1305,15 +1289,6 @@ function drawPoseOverlay(video, landmarks) {
         const { PoseLandmarker, DrawingUtils } = poseEngine.Vision;
         const drawingUtils = new DrawingUtils(ctx);
 
-        /* ---- FIX: dot/line size was a fixed 3px value on a canvas
-           sized to the camera's native resolution (e.g. 1280px wide).
-           When the display shrinks that canvas — most notably in
-           dance mode, where the camera panel is squeezed to half-width
-           next to the reference video — a 3px dot becomes a sub-pixel
-           speck and is effectively invisible. Sizes now scale with the
-           canvas's actual pixel width so they stay clearly visible at
-           any display size, plus a dark outline for contrast against
-           any background/clothing color. ---- */
         const scale = canvas.width / 1280;
         const lineWidth = Math.max(4, 6 * scale);
         const dotRadius = Math.max(5, 8 * scale);
@@ -1362,12 +1337,17 @@ function angleAt(a, b, c) {
     return Math.acos(cosine) * (180 / Math.PI);
 }
 
+/* NEW: signed line angle in degrees (0-360), used for shoulder/hip tilt
+   comparison between reference and user — normalized so absolute camera
+   position/distance doesn't matter, only the RELATIVE line angle does. */
+function lineAngleDeg(a, b) {
+    if (!a || !b) return null;
+    return Math.atan2(b.y - a.y, b.x - a.x) * (180 / Math.PI);
+}
+
 
 /* =========================================================
-   NEW: CAMERA / POSE QUALITY GUIDANCE (Feature 13)
-   Reads MediaPipe's own per-landmark visibility scores —
-   no guessing, no random timers. Only shown when the frame
-   actually justifies it.
+   CAMERA / POSE QUALITY GUIDANCE (Feature 13)
 ========================================================= */
 
 const QUALITY_HINT_KEY_LANDMARKS = [
@@ -1435,9 +1415,7 @@ function showCameraQualityHint(message) {
 
 
 /* =========================================================
-   NEW: PER-FRAME JOINT ANGLE SNAPSHOT
-   This is the shared feature set used by exercise
-   recognition, rep counting and form scoring.
+   PER-FRAME JOINT ANGLE SNAPSHOT
 ========================================================= */
 
 function computeFrameAngles(landmarks) {
@@ -1467,6 +1445,14 @@ function computeFrameAngles(landmarks) {
     const rightElbowAngle = angleAt(rightShoulder, rightElbow, rightWrist);
     const leftKneeAngle = angleAt(leftHip, leftKnee, leftAnkle);
     const rightKneeAngle = angleAt(rightHip, rightKnee, rightAnkle);
+    /* NEW: shoulder joint angle (elbow-shoulder-hip) — needed for the
+       reference-comparison engine's "shoulder angle difference" metric
+       from spec Feature 2. */
+    const leftShoulderAngle = angleAt(leftElbow, leftShoulder, leftHip);
+    const rightShoulderAngle = angleAt(rightElbow, rightShoulder, rightHip);
+    /* NEW: hip joint angle (shoulder-hip-knee). */
+    const leftHipAngle = angleAt(leftShoulder, leftHip, leftKnee);
+    const rightHipAngle = angleAt(rightShoulder, rightHip, rightKnee);
 
     const elbowVals = [leftElbowAngle, rightElbowAngle].filter(v => v != null);
     const kneeVals = [leftKneeAngle, rightKneeAngle].filter(v => v != null);
@@ -1498,23 +1484,45 @@ function computeFrameAngles(landmarks) {
 
     const pressHeight = (shoulderMid && wristMid) ? (shoulderMid.y - wristMid.y) : null;
 
+    /* NEW: normalized body scale — the distance between shoulder-mid and
+       hip-mid, used to normalize any distance-based metric so camera
+       distance doesn't dominate the comparison. Not used for angles
+       (angles are already scale-invariant) but kept for future distance
+       metrics. */
+    const torsoScale = (shoulderMid && hipMid) ? Math.hypot(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y) : null;
+
     return {
         nose, leftShoulder, rightShoulder, leftElbow, rightElbow, leftWrist, rightWrist,
         leftHip, rightHip, leftKnee, rightKnee, leftAnkle, rightAnkle,
         shoulderMid, hipMid, kneeMid, ankleMid, wristMid,
         leftElbowAngle, rightElbowAngle, leftKneeAngle, rightKneeAngle,
+        leftShoulderAngle, rightShoulderAngle, leftHipAngle, rightHipAngle,
         elbowAvg, kneeAvg, backAngle, ankleYDiff, wristAboveHead, horizontalBody,
-        elbowNearTorso, pressHeight
+        elbowNearTorso, pressHeight, torsoScale
+    };
+}
+
+/* NEW: reduces a full computeFrameAngles() result down to the compact
+   set of scalar values the reference-comparison engine actually needs,
+   dropping raw landmark points to keep both timelines small in memory. */
+function extractComparisonAngles(angles) {
+    return {
+        leftShoulderAngle: angles.leftShoulderAngle,
+        rightShoulderAngle: angles.rightShoulderAngle,
+        leftElbowAngle: angles.leftElbowAngle,
+        rightElbowAngle: angles.rightElbowAngle,
+        leftHipAngle: angles.leftHipAngle,
+        rightHipAngle: angles.rightHipAngle,
+        leftKneeAngle: angles.leftKneeAngle,
+        rightKneeAngle: angles.rightKneeAngle,
+        shoulderTilt: lineAngleDeg(angles.leftShoulder, angles.rightShoulder),
+        hipTilt: lineAngleDeg(angles.leftHip, angles.rightHip)
     };
 }
 
 
 /* =========================================================
-   NEW: EXERCISE RECOGNITION (rule-based, on-device)
-   Not a trained ML classifier — a transparent heuristic
-   over joint-angle range-of-motion measured across the
-   last ~1.6 seconds of frames. Good enough for a live demo,
-   and safely reports low confidence instead of guessing.
+   EXERCISE RECOGNITION (rule-based, on-device)
 ========================================================= */
 
 function pushAngleSample(angles, now) {
@@ -1572,25 +1580,9 @@ function classifyExercise(buffer) {
     return { exercise: best, confidence: Math.round(clamp01(bestScore) * 100) };
 }
 
-/* =========================================================
-   NEW: RECOGNITION HYSTERESIS / STABILIZATION
-   Turns the raw per-tick classifyExercise() guess into a
-   stable "locked" exercise:
-   - a brand-new exercise must win RECOGNITION_LOCK_HITS
-     consecutive classify ticks before it becomes active
-     (ignores a single noisy frame)
-   - once locked, a competing exercise must beat the locked
-     confidence by RECOGNITION_SWITCH_MARGIN AND also win
-     RECOGNITION_LOCK_HITS consecutive ticks before switching
-   - a transient confidence dip does not immediately drop the
-     lock — it only clears after RECOGNITION_LOCK_HITS
-     consecutive ticks below RECOGNITION_HOLD_CONFIDENCE
-========================================================= */
-
 function stabilizeRecognition(rawExercise, rawConfidence) {
     const rec = poseEngine.recognition;
 
-    // Nothing locked yet — build confidence in a new candidate.
     if (!rec.locked) {
         if (rawExercise && rawConfidence >= CONFIDENCE_THRESHOLD) {
             if (rec.pending === rawExercise) {
@@ -1617,7 +1609,6 @@ function stabilizeRecognition(rawExercise, rawConfidence) {
         return { activeExercise: null, displayConfidence: rawConfidence, guidance: "Please position yourself clearly in front of the camera." };
     }
 
-    // Already locked onto an exercise.
     if (rawExercise === rec.locked) {
         rec.lockedConfidence = rawConfidence;
         rec.lowHits = 0;
@@ -1626,8 +1617,6 @@ function stabilizeRecognition(rawExercise, rawConfidence) {
         return { activeExercise: rec.locked, displayConfidence: rawConfidence, guidance: null };
     }
 
-    // A different exercise is winning this tick — only switch if it
-    // clearly beats the current lock AND sustains across several ticks.
     if (rawExercise && rawConfidence >= rec.lockedConfidence + RECOGNITION_SWITCH_MARGIN) {
         if (rec.pending === rawExercise) {
             rec.pendingHits++;
@@ -1645,14 +1634,12 @@ function stabilizeRecognition(rawExercise, rawConfidence) {
             return { activeExercise: rawExercise, displayConfidence: rawConfidence, guidance: null };
         }
 
-        // Still mid-switch — keep coaching against the currently locked exercise.
         return { activeExercise: rec.locked, displayConfidence: rec.lockedConfidence, guidance: null };
     }
 
     rec.pending = null;
     rec.pendingHits = 0;
 
-    // Confidence dipped but hasn't been low for long enough to drop the lock.
     if (rawConfidence < RECOGNITION_HOLD_CONFIDENCE) {
         rec.lowHits++;
         if (rec.lowHits >= RECOGNITION_LOCK_HITS) {
@@ -1697,10 +1684,6 @@ function hideRecognitionBanner() {
     $("recognitionBanner")?.classList.add("hidden");
 }
 
-
-/* updateRepCounting is now defined earlier, alongside repState,
-   with cfg.minRange enforcement (see above). Old duplicate removed. */
-
 function resetRepState() {
     repState.exercise = null;
     repState.phase = "rest";
@@ -1712,7 +1695,7 @@ function resetRepState() {
 
 
 /* =========================================================
-   NEW: FORM SCORING (0-100, continuous, per exercise)
+   FORM SCORING (0-100, continuous, per exercise)
 ========================================================= */
 
 function computeFormScore(exercise, angles) {
@@ -1753,7 +1736,7 @@ function backAlignmentLabel(backAngle) {
 
 
 /* =========================================================
-   NEW: LIVE FORM HUD
+   LIVE FORM HUD
 ========================================================= */
 
 function updateFormHud(exercise, formScore, angles) {
@@ -1776,8 +1759,6 @@ function updateFormHud(exercise, formScore, angles) {
     const backEl = $("hudBackAlignment");
     const primaryLabelEl = $("hudPrimaryLabel");
 
-    /* ---- NEW: these two elements existed in the markup but were
-       never populated — wire them to the live recognition state ---- */
     if (exerciseEl) exerciseEl.textContent = EXERCISE_LABELS[exercise] || exercise || "--";
 
     if (confidenceEl) {
@@ -1818,12 +1799,11 @@ function flashHudRep() {
 
 
 /* =========================================================
-   LIVE SPOKEN COACHING CUES (extended for new exercises)
+   LIVE SPOKEN COACHING CUES
 ========================================================= */
 
 function evaluateLiveCues(landmarks, angles, now, exercise) {
 
-    /* ---- 1) movement speed check (applies to every mode) ---- */
     if (poseEngine.lastFrameLandmarks && poseEngine.lastFrameTime) {
         const dtSeconds = (now - poseEngine.lastFrameTime) / 1000;
 
@@ -1844,26 +1824,8 @@ function evaluateLiveCues(landmarks, angles, now, exercise) {
     }
 
     if (!exercise) {
-        /* ---- FIX: dance/yoga/wellness modes are marked trackable:false
-           (no rep-counting exercise gets locked for them), which meant
-           they fell into this branch and only ever got a narrow
-           shoulder-tilt check — effectively silent for most of a
-           session. General posture coaching now applies here too:
-           back straightness, head/shoulder alignment, and movement
-           speed (the speed check above already runs for every mode).
-           This is what makes dance/yoga actually receive "keep your
-           back straight" style corrections instead of near-silence. ---- */
         if (angles.backAngle != null && angles.backAngle > 34) return "Straighten your back.";
 
-        /* ---- FIX: dance had zero arm/hand-position checking. Every
-           existing hand/elbow cue lived inside exercise-specific
-           branches (bicep curl, shoulder press) that never run during
-           dance, since dance has no locked "exercise". This is a
-           general-purpose check that works for freeform movement:
-           if one hand is raised much higher than the other for a
-           sustained moment, it's flagged — catching the "forgot to
-           raise the other arm" / uneven arm mistake without needing
-           a specific exercise to be recognized. ---- */
         if (angles.leftWrist && angles.rightWrist) {
             const handHeightDiff = Math.abs(angles.leftWrist.y - angles.rightWrist.y);
             if (handHeightDiff > 0.18) return "Keep both arms even.";
@@ -1947,13 +1909,6 @@ function maybeSpeakLiveCue(message, now) {
     if (!("speechSynthesis" in window)) return;
     if (window.speechSynthesis.speaking) return;
 
-    /* ---- FIX: previously a single flat cooldown applied to every
-       cue regardless of content, so the identical correction (e.g.
-       "keep your knees aligned") could repeat every ~4.5s for as
-       long as the mistake persisted, which reads as nagging rather
-       than natural coaching. A brand-new, different correction can
-       still interrupt sooner; the SAME message now needs the longer
-       POSE_SAME_CUE_GAP_MS gap before repeating. ---- */
     const isRepeat = message === poseEngine.lastCueMessage;
     const requiredGap = isRepeat ? POSE_SAME_CUE_GAP_MS : POSE_MIN_CUE_GAP_MS;
     if (now - poseEngine.lastCueTime < requiredGap) return;
@@ -1961,9 +1916,6 @@ function maybeSpeakLiveCue(message, now) {
     poseEngine.lastCueTime = now;
     poseEngine.lastCueMessage = message;
 
-    /* ---- real-time cues are spoken AND shown in the selected
-       voice language (English/Telugu/Hindi), not just tagged with
-       the language code on untranslated English text. ---- */
     const localized = localizeCue(message);
 
     const liveFeedback = $("liveFeedback");
@@ -1971,12 +1923,9 @@ function maybeSpeakLiveCue(message, now) {
 
     showHudCue(localized);
     speakWithReferenceDucking(localized, state.voiceLanguage);
+    markDemoStep("voice");
 }
 
-/* ---- NEW: surface the current spoken correction inside the Form HUD
-   itself (element already existed in the markup but was never used),
-   so judges can SEE the correction text next to the skeleton/reps,
-   not just hear it. Fades out automatically. ---- */
 let hudCueHideTimer = null;
 
 function showHudCue(text) {
@@ -1994,16 +1943,6 @@ function showHudCue(text) {
     }, POSE_SAME_CUE_GAP_MS);
 }
 
-/* =========================================================
-   NEW: AUDIO DUCKING FOR LIVE VOICE CORRECTIONS
-   The reference video's background music plays at full volume
-   (that's the intended dance-along experience). Rather than
-   muting it or letting it fight the spoken correction for
-   audibility, temporarily duck its volume down while the AI is
-   actually speaking, then restore it the moment speech ends —
-   the same technique radio/podcast apps use under voiceovers.
-========================================================= */
-
 const REFERENCE_DUCK_VOLUME = 0.18;
 const REFERENCE_FULL_VOLUME = 1;
 
@@ -2011,9 +1950,6 @@ function speakWithReferenceDucking(text, language) {
     const reference = $("studioReference");
     const isNativeReferencePlaying = reference && !reference.paused && !reference.classList.contains("hidden");
 
-    /* ---- NEW: duck the YouTube player's volume too, using the same
-       IFrame API used for play/pause control. setVolume expects 0-100,
-       unlike the native <video> element's 0-1 range. ---- */
     const ytPlayer = state.referenceSourceType === "youtube" ? state.studioYoutubePlayer : null;
     const isYoutubePlaying = ytPlayer && typeof ytPlayer.getPlayerState === "function" && ytPlayer.getPlayerState() === 1;
 
@@ -2025,8 +1961,6 @@ function speakWithReferenceDucking(text, language) {
     }
 
     speakText(text, language, () => {
-        // Restore reference volume once this utterance finishes (or errors out),
-        // but only if the user hasn't since stopped/hidden the reference video.
         if (reference && !reference.classList.contains("hidden")) {
             reference.volume = REFERENCE_FULL_VOLUME;
         }
@@ -2039,15 +1973,6 @@ function speakWithReferenceDucking(text, language) {
 
 /* =========================================================
    REFERENCE STUDIO
-========================================================= */
-
-/* =========================================================
-   NEW: YOUTUBE IFRAME PLAYER API (studio playback control)
-   Only loaded when actually needed. Gives us play()/pause()/mute()/
-   seekTo() control over an embedded YouTube reference during
-   recording, mirroring what the native <video> element already does
-   for file/url references — so beginRecording()/stopPractice() don't
-   need separate code paths beyond a type check.
 ========================================================= */
 
 let youtubeApiLoadPromise = null;
@@ -2115,8 +2040,6 @@ function prepareReferenceForStudio() {
     const emptyEl = $("referenceEmpty");
     const DEFAULT_EMPTY_HTML = "<span>\uD83C\uDFAC</span><p>Upload a reference video</p>";
 
-    // Always start clean — avoids stray players/state from a previous session,
-    // and avoids the Instagram-specific message text leaking into later states.
     destroyStudioYoutubePlayer();
     embedWrap?.classList.add("hidden");
     reference.classList.add("hidden");
@@ -2138,15 +2061,12 @@ function prepareReferenceForStudio() {
     }
 
     if (state.referenceSourceType === "instagram") {
-        // No embeddable/controllable player available — be honest in the UI
-        // rather than show a broken frame.
         if (emptyEl) emptyEl.innerHTML = "<span>\uD83D\uDCF7</span><p>Instagram link saved, but can't be played here \u2014 open it on Instagram to follow along.</p>";
         emptyEl?.classList.remove("hidden");
         $("referenceStatus").textContent = "LINK ONLY";
         return;
     }
 
-    // "file" or "url" — identical native <video> handling either way.
     reference.src = state.referenceURL;
     reference.classList.remove("hidden");
     emptyEl?.classList.add("hidden");
@@ -2173,6 +2093,7 @@ function setupStudioControls() {
             showToast("Live skeleton tracking off.");
             stopPoseTracking();
         }
+        updateDeviceAiPanel();
     });
 
     $("studioBack").addEventListener("click", () => {
@@ -2238,9 +2159,12 @@ function beginRecording() {
         state.recordingURL = null;
     }
 
-    /* ---- NEW: reset per-set rep/form metrics ---- */
     resetRepState();
     state.sessionMetrics = { reps: 0, correctReps: 0, corrections: 0, formScoreSamples: [], jointSamples: [], confidenceSamples: [] };
+
+    /* NEW: reset the on-device comparison user timeline for this take */
+    state.userAngleTimeline = [];
+    state.lastComparisonSampleTime = 0;
 
     const mimeTypes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
     let mimeType = "";
@@ -2272,12 +2196,25 @@ function beginRecording() {
 
     state.isRecording = true;
     state.practiceStartTime = Date.now();
+    state.recordStartPerfTime = performance.now();
 
     updateRecordingUI(true);
     startPracticeTimer();
     startReferencePlayback();
 
     $("liveFeedback").textContent = "Recording — movement captured.";
+    if (state.selectedMode === "dance") setCompareStep(2);
+    markDemoStep("record");
+}
+
+/* NEW: Feature 2/5 — throttled push of a full comparison-angle snapshot
+   during recording, timestamped relative to recording start. */
+function pushUserComparisonSample(angles, now) {
+    if (now - state.lastComparisonSampleTime < COMPARISON_SAMPLE_INTERVAL_MS) return;
+    state.lastComparisonSampleTime = now;
+
+    const t = state.recordStartPerfTime != null ? (now - state.recordStartPerfTime) / 1000 : 0;
+    state.userAngleTimeline.push({ t, ...extractComparisonAngles(angles) });
 }
 
 
@@ -2286,8 +2223,6 @@ function beginRecording() {
 ========================================================= */
 
 function startReferencePlayback() {
-    /* ---- NEW: YouTube reference uses the IFrame Player API instead of
-       the native <video> element's play()/currentTime/muted controls. ---- */
     if (state.referenceSourceType === "youtube") {
         const player = state.studioYoutubePlayer;
         if (player && typeof player.playVideo === "function") {
@@ -2301,23 +2236,12 @@ function startReferencePlayback() {
         }
         return;
     }
-    if (state.referenceSourceType === "instagram") return; // no controllable player
+    if (state.referenceSourceType === "instagram") return;
 
     const reference = $("studioReference");
     if (!reference || reference.classList.contains("hidden") || !state.referenceURL) return;
 
     reference.currentTime = 0;
-
-    /* ---- Reference video's own background music plays normally —
-       it's the intended reference experience (e.g. dance music to
-       move along to). It is NOT muted. What IS kept separate:
-       - cameraVideo (your own camera preview) stays muted, so your
-         mic audio is captured into the recording but never played
-         back out loud through the speakers during the take — this
-         is what avoids feedback-loop / "multiple audio streams
-         fighting". See speakWithReferenceDucking() below for how
-         AI voice corrections stay audible over the reference music
-         instead of the two colliding. ---- */
     reference.muted = false;
     reference.volume = 1;
 
@@ -2362,6 +2286,7 @@ function stopPractice(showResults = true) {
     $("cameraStatus").textContent = "PROCESSING";
 
     if (showResults) $("studioHint").textContent = "Uploading video to AI...";
+    markDemoStep("stop");
 }
 
 
@@ -2385,6 +2310,10 @@ function handleRecordingStopped() {
     reviewVideo.src = state.recordingURL;
     reviewVideo.load();
 
+    /* NEW: Feature 7 — mirror the reference video into the review screen
+       (only for playable file/url reference types) */
+    setupReviewReferenceVideo();
+
     const duration = Math.max(1, (Date.now() - (state.practiceStartTime || Date.now())) / 1000);
 
     const exerciseUsed = state.activeExercise || $("exerciseSelect")?.value || state.selectedMode;
@@ -2393,9 +2322,6 @@ function handleRecordingStopped() {
         ? Math.round(state.sessionMetrics.formScoreSamples.reduce((a, b) => a + b, 0) / state.sessionMetrics.formScoreSamples.length)
         : null;
 
-    /* ---- NEW: summarize joint-angle and confidence samples collected
-       during recording into small averages Gemini can use as
-       supporting evidence (Feature 5) ---- */
     const jointMetrics = summarizeJointSamples(state.sessionMetrics.jointSamples);
     const avgConfidence = state.sessionMetrics.confidenceSamples.length
         ? Math.round(state.sessionMetrics.confidenceSamples.reduce((a, b) => a + b, 0) / state.sessionMetrics.confidenceSamples.length)
@@ -2413,10 +2339,10 @@ function handleRecordingStopped() {
         score: null,
         breakdown: null,
         mistakes: [],
+        onDeviceMistakes: [],
         translations: null,
         originalFeedback: "",
 
-        /* ---- NEW: session metrics captured live during the set ---- */
         metrics: {
             reps: state.sessionMetrics.reps,
             correctReps: state.sessionMetrics.correctReps,
@@ -2429,14 +2355,19 @@ function handleRecordingStopped() {
 
     showPage("analysis");
     populateWorkoutSummary(state.currentSession);
+    if (state.selectedMode === "dance") setCompareStep(3);
+
+    /* NEW: Feature 2/5/6/7 — run the on-device reference comparison
+       immediately (fast, local, no network) in parallel with Gemini.
+       This is also what keeps the results screen useful if Gemini
+       fails (Feature 12). */
+    runOnDeviceComparison();
+
     runAnalysis();
+    markDemoStep("review");
 }
 
 
-/* ---- NEW: turns the raw per-frame joint sample array collected
-   during recording into a small set of averages — this is the
-   "jointMetrics" payload sent to Gemini as supporting sensor
-   evidence (Feature 5), not the full per-frame stream. ---- */
 function summarizeJointSamples(samples) {
     if (!samples || !samples.length) return null;
 
@@ -2456,7 +2387,387 @@ function summarizeJointSamples(samples) {
 
 
 /* =========================================================
-   NEW: WORKOUT SUMMARY (reps / accuracy / corrections / duration)
+   NEW — Feature 2/5/6/7: ON-DEVICE REFERENCE COMPARISON ENGINE
+   Runs entirely in the browser, no server round-trip. Extracts a pose
+   timeline from the reference video (only possible for "file"/"url"
+   reference types — YouTube/Instagram embeds block frame access), then
+   compares it against the timeline captured live during recording.
+
+   HONEST LIMITATION (disclosed in the UI and in the final report): the
+   two timelines are aligned by scaling user-time proportionally onto
+   reference-time (assumes the performer's take is roughly the same
+   relative pace as the reference, start to finish). This is a
+   reasonable browser-only heuristic, not frame-perfect choreography
+   alignment — there is no fake data here, every angle/timestamp comes
+   from real MediaPipe detections, but the ALIGNMENT between the two
+   videos is an approximation.
+========================================================= */
+
+const COMPARISON_JOINTS = [
+    { key: "leftShoulderAngle", label: "Left shoulder", threshold: 18 },
+    { key: "rightShoulderAngle", label: "Right shoulder", threshold: 18 },
+    { key: "leftElbowAngle", label: "Left elbow", threshold: 20 },
+    { key: "rightElbowAngle", label: "Right elbow", threshold: 20 },
+    { key: "leftHipAngle", label: "Left hip", threshold: 18 },
+    { key: "rightHipAngle", label: "Right hip", threshold: 18 },
+    { key: "leftKneeAngle", label: "Left knee", threshold: 20 },
+    { key: "rightKneeAngle", label: "Right knee", threshold: 20 },
+    { key: "shoulderTilt", label: "Shoulder alignment", threshold: 14 },
+    { key: "hipTilt", label: "Hip alignment", threshold: 14 }
+];
+
+const REFERENCE_ANALYSIS_MAX_SAMPLES = 140;
+const REFERENCE_ANALYSIS_MIN_INTERVAL_SEC = 0.35;
+const REFERENCE_ANALYSIS_MAX_DURATION_SEC = 240; // safety cap: skip on-device comparison for very long references
+
+async function runOnDeviceComparison() {
+    const listEl = $("onDeviceMistakeList");
+    const countEl = $("onDeviceMistakeCount");
+
+    const referenceUsable = state.referenceURL && (state.referenceSourceType === "file" || state.referenceSourceType === "url");
+
+    if (!referenceUsable) {
+        state.referenceAnalysisStatus = "unavailable";
+        state.referenceAnalysisReason = state.referenceURL
+            ? "The reference is a YouTube or Instagram link — the browser can't read video frames from those embeds, so on-device comparison isn't possible. Gemini's cloud review can still analyze it."
+            : "No reference video was used for this session, so there is nothing to compare joint angles against.";
+        state.currentSession.onDeviceMistakes = [];
+        renderOnDeviceMistakes([]);
+        return;
+    }
+
+    if (!state.userAngleTimeline.length) {
+        state.referenceAnalysisStatus = "unavailable";
+        state.referenceAnalysisReason = "No pose samples were captured during recording (skeleton tracking may have been off or no body was detected).";
+        renderOnDeviceMistakes([]);
+        return;
+    }
+
+    listEl.innerHTML = `<div class="empty-message">📱 Comparing your joint angles against the reference video, on-device...</div>`;
+    countEl.textContent = "Analyzing...";
+    state.referenceAnalysisStatus = "analyzing";
+
+    try {
+        if (!state.referenceAngleTimeline.length) {
+            await buildReferenceTimeline();
+        }
+
+        if (!state.referenceAngleTimeline.length) {
+            throw new Error(state.referenceAnalysisReason || "Reference analysis produced no usable samples.");
+        }
+
+        const mistakes = computeComparisonMistakes(state.userAngleTimeline, state.referenceAngleTimeline, state.currentSession.duration);
+        state.currentSession.onDeviceMistakes = mistakes;
+        state.referenceAnalysisStatus = "ready";
+        renderOnDeviceMistakes(mistakes);
+        markDemoStep("compare");
+
+    } catch (error) {
+        console.warn("On-device reference comparison failed:", error);
+        state.referenceAnalysisStatus = "unavailable";
+        state.referenceAnalysisReason = "On-device comparison could not complete (" + (error?.message || "unknown error") + ").";
+        state.currentSession.onDeviceMistakes = [];
+        renderOnDeviceMistakes([]);
+    }
+}
+
+/* NEW: extracts a pose timeline from the reference video by seeking
+   through it and running MediaPipe on each sampled frame. Reuses the
+   live pose landmarker (safe to reuse here — the camera detection loop
+   has already been cancelled by the time this runs, see
+   handleRecordingStopped -> stopCameraOnly). */
+async function buildReferenceTimeline() {
+    const landmarker = await ensurePoseLandmarker();
+    if (!landmarker) {
+        state.referenceAnalysisReason = "The on-device pose model isn't available, so reference frames can't be analyzed.";
+        return;
+    }
+
+    const duration = state.referenceDuration;
+    if (!duration || !Number.isFinite(duration) || duration <= 0) {
+        state.referenceAnalysisReason = "Reference video duration is unknown.";
+        return;
+    }
+    if (duration > REFERENCE_ANALYSIS_MAX_DURATION_SEC) {
+        state.referenceAnalysisReason = `Reference video is longer than ${Math.round(REFERENCE_ANALYSIS_MAX_DURATION_SEC / 60)} minutes — on-device comparison is skipped to keep the browser responsive. Gemini's cloud review still covers the full video.`;
+        return;
+    }
+
+    const hiddenVideo = document.createElement("video");
+    hiddenVideo.src = state.referenceURL;
+    hiddenVideo.muted = true;
+    hiddenVideo.playsInline = true;
+    hiddenVideo.crossOrigin = "anonymous";
+    hiddenVideo.style.cssText = "position:fixed; left:-9999px; top:-9999px; width:1px; height:1px;";
+    document.body.appendChild(hiddenVideo);
+
+    try {
+        await new Promise((resolve, reject) => {
+            hiddenVideo.addEventListener("loadedmetadata", resolve, { once: true });
+            hiddenVideo.addEventListener("error", () => reject(new Error("Could not load reference video for analysis.")), { once: true });
+            setTimeout(() => reject(new Error("Timed out loading reference video for analysis.")), 15000);
+        });
+
+        const step = Math.max(REFERENCE_ANALYSIS_MIN_INTERVAL_SEC, duration / REFERENCE_ANALYSIS_MAX_SAMPLES);
+        const timeline = [];
+        let fakeTimestampMs = 0;
+
+        for (let t = 0; t < duration; t += step) {
+            await seekVideoTo(hiddenVideo, t);
+
+            fakeTimestampMs += 33; // strictly increasing, required by VIDEO-mode detectForVideo()
+
+            let result;
+            try {
+                result = landmarker.detectForVideo(hiddenVideo, fakeTimestampMs);
+            } catch (error) {
+                continue; // skip an unreadable frame rather than aborting the whole analysis
+            }
+
+            const landmarks = result?.landmarks?.[0];
+            if (!landmarks) continue;
+
+            const angles = computeFrameAngles(landmarks);
+            timeline.push({ t, ...extractComparisonAngles(angles) });
+        }
+
+        state.referenceAngleTimeline = timeline;
+
+        if (!timeline.length) {
+            state.referenceAnalysisReason = "No body was detected in the reference video (check framing/lighting in the reference clip).";
+        }
+
+    } finally {
+        hiddenVideo.pause();
+        hiddenVideo.removeAttribute("src");
+        hiddenVideo.load();
+        hiddenVideo.remove();
+        /* IMPORTANT: restart the live pose loop's own detect timer isn't
+           affected — this landmarker instance is stateless between
+           detectForVideo() calls beyond the monotonic timestamp
+           requirement, and the camera loop creates fresh state on its
+           next startPoseTracking() call. */
+    }
+}
+
+function seekVideoTo(video, time) {
+    return new Promise((resolve, reject) => {
+        const onSeeked = () => {
+            video.removeEventListener("seeked", onSeeked);
+            resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        try {
+            video.currentTime = Math.min(time, Math.max(0, (video.duration || time) - 0.05));
+        } catch (error) {
+            video.removeEventListener("seeked", onSeeked);
+            reject(error);
+            return;
+        }
+        setTimeout(() => {
+            video.removeEventListener("seeked", onSeeked);
+            resolve(); // don't hang forever on a frame that never fires "seeked"
+        }, 800);
+    });
+}
+
+/* NEW: nearest-neighbor lookup by time in a sorted timeline array */
+function findNearestSample(timeline, t) {
+    if (!timeline.length) return null;
+    let lo = 0, hi = timeline.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (timeline[mid].t < t) lo = mid + 1; else hi = mid;
+    }
+    if (lo > 0) {
+        const prev = timeline[lo - 1];
+        const curr = timeline[lo];
+        return Math.abs(prev.t - t) <= Math.abs(curr.t - t) ? prev : curr;
+    }
+    return timeline[lo];
+}
+
+function directionalCorrection(label, userVal, refVal) {
+    const diff = userVal - refVal;
+    const side = label.startsWith("Left") ? "left" : label.startsWith("Right") ? "right" : "";
+    const joint = label.replace(/^Left |^Right /, "").toLowerCase();
+
+    if (label.includes("alignment")) {
+        return `Level out your ${joint} — it's tilted relative to the reference.`;
+    }
+
+    if (diff > 0) {
+        return `${side ? `Your ${side} ${joint}` : `Your ${joint}`} is more extended than the reference — bend it in slightly.`;
+    }
+    return `${side ? `Your ${side} ${joint}` : `Your ${joint}`} is more bent than the reference — extend it a bit more.`;
+}
+
+/* NEW: the core comparison — walks the user's timeline, maps each
+   sample to reference-time by simple proportional scaling, computes
+   real per-joint differences, and emits a mistake whenever a
+   difference is sustained above threshold for a meaningful duration. */
+function computeComparisonMistakes(userTimeline, referenceTimeline, userDurationSeconds) {
+    if (!userTimeline.length || !referenceTimeline.length) return [];
+
+    const refDuration = referenceTimeline[referenceTimeline.length - 1].t || 1;
+    const userDuration = userDurationSeconds || (userTimeline[userTimeline.length - 1]?.t || 1);
+    const scale = refDuration / Math.max(0.5, userDuration);
+
+    const runs = {}; // per joint key: { active, startT, maxDiff, actualAtPeak, targetAtPeak }
+    const mistakes = [];
+    let idCounter = 1;
+
+    const emit = (jointDef, run, endT) => {
+        const dur = endT - run.startT;
+        if (dur < 0.35) return; // ignore brief/noisy blips
+        const severity = run.maxDiff > 30 ? "high" : run.maxDiff > 20 ? "medium" : "low";
+        mistakes.push({
+            id: idCounter++,
+            time: Math.max(0, run.startT),
+            duration: Math.round(dur * 10) / 10,
+            timestamp: formatTime(run.startT),
+            type: `${jointDef.label} position`,
+            bodyPart: jointDef.label,
+            title: `${jointDef.label} position`,
+            actualValue: Math.round(run.actualAtPeak),
+            targetValue: Math.round(run.targetAtPeak),
+            difference: Math.round(run.maxDiff),
+            severity,
+            description: `Your ${jointDef.label.toLowerCase()} measured ${Math.round(run.actualAtPeak)}° vs the reference's ${Math.round(run.targetAtPeak)}° — a ${Math.round(run.maxDiff)}° difference, sustained for ${dur.toFixed(1)}s.`,
+            correction: directionalCorrection(jointDef.label, run.actualAtPeak, run.targetAtPeak),
+            language: "en-IN",
+            source: "on-device"
+        });
+    };
+
+    COMPARISON_JOINTS.forEach(jointDef => { runs[jointDef.key] = null; });
+
+    userTimeline.forEach(sample => {
+        const refT = Math.min(refDuration, sample.t * scale);
+        const refSample = findNearestSample(referenceTimeline, refT);
+        if (!refSample) return;
+
+        COMPARISON_JOINTS.forEach(jointDef => {
+            const userVal = sample[jointDef.key];
+            const refVal = refSample[jointDef.key];
+            if (userVal == null || refVal == null) return;
+
+            const diff = Math.abs(userVal - refVal);
+            const run = runs[jointDef.key];
+
+            if (diff > jointDef.threshold) {
+                if (!run) {
+                    runs[jointDef.key] = { startT: sample.t, maxDiff: diff, actualAtPeak: userVal, targetAtPeak: refVal };
+                } else if (diff > run.maxDiff) {
+                    run.maxDiff = diff;
+                    run.actualAtPeak = userVal;
+                    run.targetAtPeak = refVal;
+                }
+            } else if (run) {
+                emit(jointDef, run, sample.t);
+                runs[jointDef.key] = null;
+            }
+        });
+    });
+
+    // close out any runs still open at the end of the recording
+    const lastT = userTimeline[userTimeline.length - 1].t;
+    COMPARISON_JOINTS.forEach(jointDef => {
+        const run = runs[jointDef.key];
+        if (run) emit(jointDef, run, lastT);
+    });
+
+    // cap to the most significant issues, sorted chronologically for display
+    return mistakes
+        .sort((a, b) => b.difference - a.difference)
+        .slice(0, 6)
+        .sort((a, b) => a.time - b.time)
+        .map((m, i) => ({ ...m, id: i + 1 }));
+}
+
+function renderOnDeviceMistakes(mistakes) {
+    const listEl = $("onDeviceMistakeList");
+    const countEl = $("onDeviceMistakeCount");
+    if (!listEl || !countEl) return;
+
+    if (state.referenceAnalysisStatus === "unavailable") {
+        countEl.textContent = "Unavailable";
+        listEl.innerHTML = `<div class="empty-message">${escapeHTML(state.referenceAnalysisReason || "On-device comparison is unavailable for this session.")}</div>`;
+        return;
+    }
+
+    if (!mistakes.length) {
+        countEl.textContent = "0 issues";
+        listEl.innerHTML = `<div class="empty-message">✅ No sustained joint-angle differences were measured against the reference.</div>`;
+        return;
+    }
+
+    countEl.textContent = `${mistakes.length} ${mistakes.length === 1 ? "issue" : "issues"}`;
+
+    listEl.innerHTML = mistakes.map(mistake => `
+        <div class="mistake-card" data-mistake-time="${mistake.time}" data-mistake-source="on-device">
+            <div class="mistake-time">${escapeHTML(mistake.timestamp)}</div>
+            <div class="mistake-icon">!</div>
+            <div class="mistake-content">
+                <strong>${escapeHTML(mistake.title)}</strong>
+                <span>${escapeHTML(mistake.description)}</span>
+                <span class="mistake-metrics">You: ${mistake.actualValue}° · Reference: ${mistake.targetValue}° · Δ ${mistake.difference}° · ${mistake.duration}s</span>
+                <span class="mistake-fix"><b>How to fix:</b> ${escapeHTML(mistake.correction)}</span>
+                <span class="mistake-source-badge">📱 ON-DEVICE · MEASURED LIVE</span>
+            </div>
+            <button class="mistake-speak-btn" data-speak-ondevice="${mistake.id}" title="Speak this feedback">🔊</button>
+        </div>
+    `).join("");
+
+    listEl.querySelectorAll(".mistake-card").forEach(card => {
+        card.addEventListener("click", event => {
+            if (event.target.closest(".mistake-speak-btn")) return;
+            seekReviewVideo(Number(card.dataset.mistakeTime));
+        });
+    });
+
+    listEl.querySelectorAll("[data-speak-ondevice]").forEach(button => {
+        button.addEventListener("click", event => {
+            event.stopPropagation();
+            const id = Number(button.dataset.speakOndevice);
+            const mistake = mistakes.find(m => m.id === id);
+            if (mistake) speakText(`${mistake.title}. ${mistake.description} ${mistake.correction}`, state.feedbackLanguage);
+        });
+    });
+}
+
+
+/* =========================================================
+   NEW — Feature 7: Reference video in the side-by-side review screen
+========================================================= */
+function setupReviewReferenceVideo() {
+    const card = $("reviewReferenceCard");
+    const video = $("reviewReferenceVideo");
+    if (!card || !video) return;
+
+    const playable = state.referenceURL && (state.referenceSourceType === "file" || state.referenceSourceType === "url");
+
+    if (!playable) {
+        card.classList.add("hidden");
+        return;
+    }
+
+    video.src = state.referenceURL;
+    card.classList.remove("hidden");
+}
+
+/* NEW: proportional time mapping shared with the comparison engine, used
+   so clicking a mistake also seeks the reference video to roughly the
+   matching moment. */
+function mapUserTimeToReferenceTime(userTime) {
+    if (!state.referenceDuration || !state.currentSession?.duration) return null;
+    const scale = state.referenceDuration / Math.max(0.5, state.currentSession.duration);
+    return Math.max(0, Math.min(state.referenceDuration, userTime * scale));
+}
+
+
+/* =========================================================
+   WORKOUT SUMMARY (reps / accuracy / corrections / duration)
 ========================================================= */
 
 function populateWorkoutSummary(session) {
@@ -2468,19 +2779,9 @@ function populateWorkoutSummary(session) {
     $("summaryCorrections").textContent = metrics.corrections || metrics.corrections === 0 ? String(metrics.corrections) : "--";
     $("summaryDuration").textContent = formatTime(session.duration);
 
-    /* ---- NEW: Live AI score badge is available immediately from
-       on-device metrics, before Gemini responds ---- */
     const liveBadge = $("liveScoreBadge");
     if (liveBadge) liveBadge.textContent = metrics.avgFormScore != null ? `${metrics.avgFormScore}%` : "--";
 }
-
-/* =========================================================
-   NEW: SESSION INTELLIGENCE SUMMARY (Feature 7)
-   Fills in the strongest / weakest / major-issue / Gemini-score
-   cards that existed in the markup but were never populated —
-   derived only from real breakdown + mistake data, no invented
-   numbers.
-========================================================= */
 
 function populateSessionIntelligence(session, result) {
     const geminiBadge = $("geminiScoreBadge");
@@ -2503,7 +2804,7 @@ function populateSessionIntelligence(session, result) {
     }
 
     const mistakes = result.mistakes || [];
-    $("summaryMajorMistake").textContent = mistakes.length ? mistakes[0].title : "None detected";
+    $("summaryMajorMistake").textContent = mistakes.length ? mistakes[0].title : (session.onDeviceMistakes?.length ? session.onDeviceMistakes[0].title : "None detected");
 }
 
 
@@ -2544,6 +2845,8 @@ function stopCameraOnly() {
         cameraVideo.pause();
         cameraVideo.srcObject = null;
     }
+
+    updateDeviceAiPanel();
 }
 
 function cleanupStudio() {
@@ -2640,6 +2943,7 @@ function resetStudioUI() {
 
     resetRepState();
     state.sessionMetrics = { reps: 0, correctReps: 0, corrections: 0, formScoreSamples: [], jointSamples: [], confidenceSamples: [] };
+    state.userAngleTimeline = [];
     state.detectedExercise = null;
     state.detectionConfidence = 0;
     state.activeExercise = null;
@@ -2652,6 +2956,7 @@ function resetStudioUI() {
     poseEngine.noPoseFrames = 0;
 
     prepareReferenceForStudio();
+    updateDeviceAiPanel();
 }
 
 
@@ -2661,6 +2966,8 @@ function resetStudioUI() {
 
 async function runAnalysis() {
     if (!state.currentSession) return;
+
+    $("geminiFailBanner").classList.add("hidden");
 
     $("overallScore").textContent = "--";
     $("resultTitle").textContent = "Analyzing movement...";
@@ -2673,32 +2980,26 @@ async function runAnalysis() {
     $("summaryMajorMistake").textContent = "--";
     setGeminiStatusPills("● Analyzing session...");
 
-    try {
-        const formData = new FormData();
-        formData.append("video", state.currentSession.recordingBlob, "practice.webm");
+try {
+    console.log("REFERENCE DEBUG:", {
+        referenceURL: state.referenceURL,
+        referenceSourceType: state.referenceSourceType,
+        referenceFile: state.referenceFile
+    });
 
-        if (state.referenceFile) {
-            formData.append("reference", state.referenceFile, state.referenceFile.name);
-        } else if (state.referenceSourceType === "url" && state.referenceURL) {
-            /* ---- NEW: a pasted direct-video-file link has no local File
-               object to upload — the backend fetches it server-side
-               instead (no CORS restriction there) and treats it exactly
-               like an uploaded reference file. YouTube/Instagram are
-               intentionally NOT sent here; see loadReferenceFromUrl(). ---- */
-            formData.append("referenceUrl", state.referenceURL);
-        }
+    const formData = new FormData();
+    formData.append("video", state.currentSession.recordingBlob, "practice.webm");
+
+    if (state.referenceFile) {
+        formData.append("reference", state.referenceFile, state.referenceFile.name);
+    } else if (state.referenceSourceType === "url" && state.referenceURL) {
+        formData.append("referenceUrl", state.referenceURL);
+    }
 
         formData.append("mode", state.selectedMode);
         formData.append("exercise", state.currentSession.exercise || $("exerciseSelect").value);
         formData.append("language", state.voiceLanguage);
 
-        /* ---- NEW: Feature 5 — send the on-device session metrics
-           collected by MediaPipe alongside the video, so Gemini
-           analyzes "Computer Vision + Sensor Data" together instead
-           of the video alone. These were computed live and are sent
-           as-is; the backend prompt explicitly tells Gemini to treat
-           them as supporting evidence, not ground truth, and to keep
-           relying on what it actually sees in the video. ---- */
         const metrics = state.currentSession.metrics || {};
         formData.append("reps", String(metrics.reps ?? 0));
         formData.append("correctReps", String(metrics.correctReps ?? 0));
@@ -2708,7 +3009,7 @@ async function runAnalysis() {
         formData.append("duration", String(Math.round(state.currentSession.duration || 0)));
         formData.append("jointMetrics", metrics.jointMetrics ? JSON.stringify(metrics.jointMetrics) : "");
 
-        const response = await fetch(`${BACKEND_URL}/api/analyze`, { method: "POST", body: formData });
+        const response = await fetch(`${API_BASE_URL}/api/analyze`, { method: "POST", body: formData });
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -2720,19 +3021,74 @@ async function runAnalysis() {
         applyAnalysisResult(normalized);
         setGeminiStatusPills("● Ready");
         showToast("AI analysis complete.");
+        state.geminiAvailable = true;
+        markDemoStep("gemini");
 
     } catch (error) {
         console.error("AI analysis failed:", error);
-
-        $("resultTitle").textContent = "Analysis failed";
-        $("resultText").textContent = "The AI server could not complete this analysis. Check the backend terminal.";
-        $("mistakeList").innerHTML = `<div class="empty-message">AI analysis unavailable. Please check that server.js is running and GEMINI_API_KEY is configured.</div>`;
-        $("coachRecommendationCard").innerHTML = `<div class="empty-message">Recommendation unavailable — the AI server did not respond.</div>`;
-        setGeminiStatusPills("● Offline");
-
-        showToast("AI analysis failed. Check server.");
+        handleGeminiAnalysisFailure(error);
     }
 }
+
+/* NEW — Feature 12: dedicated failure handler. Keeps every real
+   on-device value visible (score badge, reps, form, on-device
+   comparison, recording) and shows an honest "Gemini Deep Review:
+   Unavailable" banner with a retry button, instead of a generic
+   broken-looking screen. Never fabricates a fake successful result. */
+function handleGeminiAnalysisFailure(error) {
+    state.geminiAvailable = false;
+    state.lastGeminiFailureReason = error?.message || "Unknown error";
+
+    const session = state.currentSession;
+    const metrics = session?.metrics || {};
+
+    $("overallScore").textContent = metrics.avgFormScore != null ? String(metrics.avgFormScore) : "--";
+    $("resultTitle").textContent = "Live coaching complete";
+    $("resultText").textContent = "On-device coaching finished successfully. Gemini's deeper cloud review could not be completed for this session — see the banner below.";
+    $("mistakeList").innerHTML = `<div class="empty-message">Gemini's cloud review is unavailable right now. Your on-device reference comparison (above) and live metrics are still real and available.</div>`;
+    $("coachRecommendationCard").innerHTML = `<div class="empty-message">Recommendation unavailable \u2014 the Gemini server did not respond. Your live score and on-device comparison are still shown above.</div>`;
+    setGeminiStatusPills("● Unavailable");
+
+    const banner = $("geminiFailBanner");
+    const reasonEl = $("geminiFailReason");
+    if (banner && reasonEl) {
+        reasonEl.textContent = classifyErrorForDisplay(error);
+        banner.classList.remove("hidden");
+    }
+
+    if (metrics.avgFormScore != null) {
+        updateScoreRing(metrics.avgFormScore);
+    }
+
+    showToast("Gemini review unavailable. Your on-device data is still shown.");
+}
+
+/* NEW: turns a raw fetch/network error message into a short, honest,
+   non-technical reason string for the failure banner. */
+function classifyErrorForDisplay(error) {
+    const raw = String(error?.message || error || "");
+
+    if (/Backend 429/i.test(raw) || /quota/i.test(raw)) {
+        return "The AI service has reached its request limit for now. Please wait about a minute and try again.";
+    }
+    if (/Backend 5\d\d/i.test(raw)) {
+        return "The Gemini AI service is temporarily busy or unavailable. Please try again in a moment.";
+    }
+    if (/Failed to fetch|NetworkError|TypeError/i.test(raw)) {
+        return "Could not reach the backend server. Check your internet connection, or that the server is running.";
+    }
+    return "Post-session AI review is temporarily unavailable.";
+}
+
+/* NEW — Feature 12: retry wiring */
+function setupGeminiRetry() {
+    $("retryGeminiBtn")?.addEventListener("click", () => {
+        if (!state.currentSession) return;
+        showToast("Retrying Gemini review...");
+        runAnalysis();
+    });
+}
+
 
 /* =========================================================
    NORMALIZE RESULT
@@ -2810,15 +3166,6 @@ function applyAnalysisResult(result) {
         state.feedbackLanguage = state.voiceLanguage;
     }
 
-    /* ---- FIX: setting a <select>'s .value in JS does NOT fire its
-       'change' event, so translateCurrentFeedback() — which is only
-       wired to the dropdown's change listener — was never actually
-       running automatically. This meant the results screen always
-       displayed Gemini's default English text/mistakes first, even
-       when Telugu or Hindi was selected the whole session, until the
-       user manually re-touched the dropdown. Explicitly apply the
-       selected language now so the very first paint is already
-       correct. ---- */
     translateCurrentFeedback(state.voiceLanguage);
 
     saveSession();
@@ -2857,7 +3204,7 @@ function updateScoreRing(score) {
 
 
 /* =========================================================
-   MISTAKES
+   MISTAKES (Gemini)
 ========================================================= */
 
 function renderMistakes(mistakes) {
@@ -2878,6 +3225,7 @@ function renderMistakes(mistakes) {
                 <strong>${escapeHTML(mistake.title)}</strong>
                 <span>${escapeHTML(mistake.description)}</span>
                 ${mistake.correction ? `<span class="mistake-fix"><b>${escapeHTML(fixLabelForLanguage())}:</b> ${escapeHTML(mistake.correction)}</span>` : ""}
+                <span class="mistake-source-badge" style="background:#1a1224; color:var(--accent); border-color:#4c3b65;">☁ GEMINI CLOUD REVIEW</span>
             </div>
             <button class="mistake-speak-btn" data-speak-mistake="${escapeHTML(mistake.id)}" title="Speak this feedback">🔊</button>
         </div>
@@ -2902,7 +3250,7 @@ function fixLabelForLanguage() {
 
 
 /* =========================================================
-   SEEK VIDEO
+   SEEK VIDEO (Feature 6/7 — jump to exact moment, both panels)
 ========================================================= */
 
 function seekReviewVideo(time) {
@@ -2915,6 +3263,22 @@ function seekReviewVideo(time) {
     video.currentTime = Math.max(0, time);
     video.play().catch(() => {});
     video.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    /* NEW: also seek the reference video to the mapped moment, if the
+       side-by-side reference panel is available */
+    const refVideo = $("reviewReferenceVideo");
+    const refCard = $("reviewReferenceCard");
+    if (refVideo && refCard && !refCard.classList.contains("hidden")) {
+        const mapped = mapUserTimeToReferenceTime(time);
+        if (mapped != null) {
+            refVideo.currentTime = mapped;
+            refVideo.play().catch(() => {});
+        }
+    }
+
+    /* NEW: highlight whichever card was clicked, across both lists */
+    document.querySelectorAll(".mistake-card").forEach(card => card.classList.remove("mistake-highlight"));
+    document.querySelectorAll(`.mistake-card[data-mistake-time="${time}"]`).forEach(card => card.classList.add("mistake-highlight"));
 }
 
 
@@ -3033,15 +3397,6 @@ function speakMistake(mistake) {
     speakText(parts.filter(Boolean).join(". ") + ".", state.feedbackLanguage);
 }
 
-/* =========================================================
-   NEW: VOICE AVAILABILITY DIAGNOSTIC
-   Many phones/browsers don't ship a Telugu or Hindi speech
-   voice by default. If that's the case, speechSynthesis will
-   silently fall back to a default voice (often reading nothing,
-   or reading it in the wrong accent) instead of throwing an
-   error — so this is checked once and surfaced clearly instead
-   of leaving it looking like a silent bug.
-========================================================= */
 let voiceAvailabilityWarned = {};
 
 function checkVoiceAvailability(language) {
@@ -3051,7 +3406,6 @@ function checkVoiceAvailability(language) {
     const langPrefix = (language || "en-IN").split("-")[0];
     const voices = window.speechSynthesis.getVoices();
 
-    // Voice list loads asynchronously in some browsers — if empty, wait once and re-check.
     if (!voices.length) {
         window.speechSynthesis.onvoiceschanged = () => checkVoiceAvailability(language);
         return;
@@ -3137,8 +3491,6 @@ function speakShortCoachSummary(result) {
 
     const lang = state.voiceLanguage || "en-IN";
     const score = result.score;
-    // Pull the top mistake from the already-localized list (translateCurrentFeedback
-    // runs before this is called), not the raw English result.mistakes.
     const topMistake = (state.currentMistakes || result.mistakes || [])[0];
 
     let message = score >= 90
@@ -3319,7 +3671,7 @@ async function generateFitnessPlan() {
     resultEl.innerHTML = `<div class="empty-message">🤖 Building your personalized plan...</div>`;
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/fitness-plan`, {
+        const response = await fetch(`${API_BASE_URL}/api/fitness-plan`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3397,10 +3749,7 @@ function renderFitnessPlan(plan) {
 
 
 /* =========================================================
-   NEW: ADAPTIVE AI COACH RECOMMENDATION
-   Compares this session's metrics with the most recent
-   previous session for the SAME exercise, and asks the
-   backend (Gemini) for a short personalized recommendation.
+   ADAPTIVE AI COACH RECOMMENDATION
 ========================================================= */
 
 async function fetchCoachRecommendation(session) {
@@ -3429,7 +3778,7 @@ async function fetchCoachRecommendation(session) {
     } : null;
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/coach-recommendation`, {
+        const response = await fetch(`${API_BASE_URL}/api/coach-recommendation`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3556,9 +3905,6 @@ function renderNutritionHistory() {
 
 /* =========================================================
    AI COACH CHATBOT (text + voice input)
-   NEW: sends current exercise / form-score context so the
-   chatbot behaves as part of one multimodal experience with
-   the camera + voice feedback, instead of a separate silo.
 ========================================================= */
 
 function setupChatWidget() {
@@ -3604,7 +3950,7 @@ async function sendChatMessage() {
     const thinkingBubble = appendChatBubble("Thinking...", "chat-bot");
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3712,6 +4058,7 @@ function saveSession() {
         score: state.currentSession.score,
         breakdown: state.currentSession.breakdown,
         mistakes: state.currentSession.mistakes,
+        onDeviceMistakes: state.currentSession.onDeviceMistakes,
         metrics: state.currentSession.metrics
     };
 
@@ -3887,7 +4234,7 @@ function updateMistakeBadge() {
 
 
 /* =========================================================
-   NEW: ACHIEVEMENTS (lightweight gamification)
+   ACHIEVEMENTS (lightweight gamification)
 ========================================================= */
 
 const ACHIEVEMENT_DEFS = [
@@ -3952,7 +4299,7 @@ function renderAchievements() {
 
 
 /* =========================================================
-   NEW: DOWNLOADABLE SESSION REPORT
+   DOWNLOADABLE SESSION REPORT
 ========================================================= */
 
 function setupReportDownload() {
@@ -3986,8 +4333,13 @@ function downloadSessionReport() {
         "AI Feedback:",
         session.originalFeedback || "-",
         "",
-        "Mistakes:",
-        ...(session.mistakes || []).map((m, i) => `${i + 1}. [${m.timestamp}] ${m.title} — ${m.description}${m.correction ? ` | Fix: ${m.correction}` : ""}`)
+        "Gemini Mistakes:",
+        ...(session.mistakes || []).map((m, i) => `${i + 1}. [${m.timestamp}] ${m.title} — ${m.description}${m.correction ? ` | Fix: ${m.correction}` : ""}`),
+        "",
+        "On-Device Reference Comparison:",
+        ...((session.onDeviceMistakes || []).length
+            ? session.onDeviceMistakes.map((m, i) => `${i + 1}. [${m.timestamp}] ${m.title} — You: ${m.actualValue}° Reference: ${m.targetValue}° Δ${m.difference}° — Fix: ${m.correction}`)
+            : ["No on-device comparison mistakes recorded."])
     ];
 
     const blob = new Blob([lines.join("\n")], { type: "text/plain" });
@@ -4016,78 +4368,201 @@ function practiceAgain() {
 
 
 /* =========================================================
-   BACKEND HEALTH CHECK
-   Frontend: Vercel
-   Backend: Render
+   BACKEND CHECK
 ========================================================= */
 
 async function checkBackend() {
     try {
-        console.log(
-            "[MovementCoach] Checking backend:",
-            `${BACKEND_URL}/api/health`
-        );
-
-        const response = await fetch(
-            `${BACKEND_URL}/api/health`,
-            {
-                method: "GET",
-                cache: "no-store"
-            }
-        );
-
-        console.log(
-            "[MovementCoach] Backend HTTP status:",
-            response.status
-        );
-
-        if (!response.ok) {
-            throw new Error(
-                `Backend returned HTTP ${response.status}`
-            );
-        }
+        const response = await fetch(`${API_BASE_URL}/api/health`);
+        if (!response.ok) throw new Error("Backend unavailable");
 
         const data = await response.json();
 
-        console.log(
-            "[MovementCoach] Backend response:",
-            data
-        );
+        $("aiStatus").textContent = "AI Coach Ready";
+        $("aiStatusText").textContent = data.message || "Gemini backend is connected.";
+        $("statusDot").classList.add("ready");
 
-        if (
-            data &&
-            data.success === true
-        ) {
-            console.log(
-                "[MovementCoach] Backend check: OK"
-            );
-
-            return true;
-        }
-
-        throw new Error(
-            "Backend health response was invalid"
-        );
+        state.geminiAvailable = Boolean(data.success);
+        const geminiConfigured = !String(data.message || "").toLowerCase().includes("missing");
+        setGeminiStatusPills(geminiConfigured ? "● Ready" : "● Not configured");
 
     } catch (error) {
-
-        console.error(
-            "[MovementCoach] Backend check failed:",
-            error
-        );
-
-        return false;
+        console.warn("Backend check failed:", error);
+        $("aiStatus").textContent = "Backend Offline";
+        $("aiStatusText").textContent = "Start server.js to enable AI analysis.";
+        state.geminiAvailable = false;
+        setGeminiStatusPills("● Offline");
     }
+
+    refreshDiagnostics();
 }
 
-/* ---- NEW: shared helper — keeps the dashboard pill and the
-   in-studio live bar pill in sync with the real Gemini state
-   instead of two independent hardcoded strings. ---- */
 function setGeminiStatusPills(text) {
     const dash = $("dashGeminiStatus");
     const live = $("geminiLiveStatus");
     if (dash) dash.textContent = text;
     if (live) live.textContent = text;
+}
+
+
+/* =========================================================
+   NEW — Feature 10: DEVICE AI STATUS PANEL
+   Every row reflects real, live app state — nothing here is a
+   static label. Called after any event that changes one of these
+   states (camera start/stop, pose ready/failed, recognition lock,
+   coach toggle).
+========================================================= */
+
+function updateDeviceAiPanel() {
+    const rows = {
+        deviceRowCamera: {
+            on: Boolean(state.cameraStream),
+            label: state.cameraStream ? "Camera — Active" : "Camera — Off"
+        },
+        deviceRowPose: {
+            on: Boolean(poseEngine.landmarker),
+            error: poseEngine.failed,
+            label: poseEngine.landmarker ? "Pose Tracking — On Device" : (poseEngine.failed ? "Pose Tracking — Failed to load" : "Pose Tracking — Loading")
+        },
+        deviceRowSkeleton: {
+            on: Boolean(poseEngine.landmarker) && state.poseEnabled,
+            label: state.poseEnabled ? (poseEngine.landmarker ? "Skeleton — On Device" : "Skeleton — Loading") : "Skeleton — Off"
+        },
+        deviceRowRecognition: {
+            on: Boolean(state.activeExercise),
+            label: state.activeExercise ? `Recognition — ${EXERCISE_LABELS[state.activeExercise] || state.activeExercise}` : "Recognition — Searching"
+        },
+        deviceRowReps: {
+            on: state.isRecording && Boolean(state.activeExercise) && Boolean(REP_CONFIG[state.activeExercise]),
+            label: "Rep Counting — On Device"
+        },
+        deviceRowVoice: {
+            on: state.coachEnabled && ("speechSynthesis" in window),
+            label: state.coachEnabled ? "Voice Coach — Active" : "Voice Coach — Off"
+        }
+    };
+
+    Object.entries(rows).forEach(([id, info]) => {
+        const el = $(id);
+        if (!el) return;
+        el.classList.remove("on", "off", "error");
+        el.classList.add(info.error ? "error" : (info.on ? "on" : "off"));
+        const label = el.querySelector("span:last-child");
+        if (label) label.textContent = info.label;
+    });
+}
+
+
+/* =========================================================
+   NEW — Feature 20: DIAGNOSTICS PANEL (developer/debug only)
+   Reads real app/browser state only. Never shows API keys or any
+   sensitive value — those never exist in frontend code at all.
+========================================================= */
+
+function setupDiagnosticsPanel() {
+    $("diagnosticsToggleBtn")?.addEventListener("click", () => {
+        const panel = $("diagnosticsPanel");
+        const btn = $("diagnosticsToggleBtn");
+        if (!panel) return;
+        const nowHidden = panel.classList.toggle("hidden");
+        if (btn) btn.textContent = nowHidden ? "Show" : "Hide";
+        if (!nowHidden) refreshDiagnostics();
+    });
+}
+
+function diagSet(id, ok, text, warn) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove("diag-bad", "diag-warn");
+    if (warn) el.classList.add("diag-warn");
+    else if (!ok) el.classList.add("diag-bad");
+}
+
+function refreshDiagnostics() {
+    const panel = $("diagnosticsPanel");
+    if (!panel || panel.classList.contains("hidden")) return;
+
+    diagSet("diagCamera", Boolean(state.cameraStream), state.cameraStream ? "OK" : (state.currentPage === "studio" ? "ERROR" : "IDLE"), state.currentPage !== "studio");
+    diagSet("diagPoseModel", Boolean(poseEngine.landmarker), poseEngine.landmarker ? "LOADED" : (poseEngine.failed ? "ERROR" : "NOT LOADED"), !poseEngine.landmarker && !poseEngine.failed);
+    diagSet("diagSkeleton", state.poseEnabled && Boolean(poseEngine.landmarker), state.poseEnabled ? (poseEngine.landmarker ? "ACTIVE" : "PENDING") : "OFF", !state.poseEnabled);
+    diagSet("diagRecognition", Boolean(state.activeExercise), state.activeExercise ? "ACTIVE" : "IDLE", true);
+    diagSet("diagVoice", "speechSynthesis" in window, ("speechSynthesis" in window) ? "READY" : "UNSUPPORTED");
+    diagSet("diagRecording", typeof MediaRecorder !== "undefined", typeof MediaRecorder !== "undefined" ? "READY" : "UNSUPPORTED");
+    diagSet("diagBackend", state.geminiAvailable !== false, state.geminiAvailable === null ? "CHECKING" : (state.geminiAvailable !== false ? "CONNECTED" : "ERROR"), state.geminiAvailable === null);
+    diagSet("diagGemini", state.geminiAvailable === true, state.geminiAvailable === true ? "AVAILABLE" : (state.geminiAvailable === false ? "ERROR" : "CHECKING"), state.geminiAvailable === null);
+    diagSet("diagReference", Boolean(state.referenceURL), state.referenceURL ? "LOADED" : "NONE", true);
+}
+
+
+/* =========================================================
+   NEW — Feature 8: JUDGE DEMO MODE
+   A guided checklist that follows the REAL app state — every step
+   checks itself off only when the actual corresponding real event
+   fires elsewhere in this file (see the markDemoStep(...) calls
+   sprinkled through camera/recording/analysis code above). Nothing
+   in this mode fabricates AI output; it only narrates real events.
+========================================================= */
+
+const JUDGE_DEMO_STEPS = [
+    { id: "mode", label: "Select Dance / Gym / Yoga" },
+    { id: "reference", label: "Load a reference video" },
+    { id: "camera", label: "Open camera" },
+    { id: "skeleton", label: "Skeleton appears (on-device MediaPipe)" },
+    { id: "recognition", label: "Live exercise recognition locks on" },
+    { id: "record", label: "Start recording" },
+    { id: "voice", label: "A real voice correction is spoken" },
+    { id: "stop", label: "Stop the session" },
+    { id: "review", label: "Results screen appears" },
+    { id: "compare", label: "On-device reference comparison completes" },
+    { id: "gemini", label: "Gemini deep review completes" },
+    { id: "seek", label: "Click a mistake → video jumps to that timestamp" }
+];
+
+function setupJudgeDemoMode() {
+    renderJudgeDemoSteps();
+
+    $("judgeDemoBtn")?.addEventListener("click", () => {
+        state.demoModeActive = true;
+        state.demoStepsDone = {};
+        renderJudgeDemoSteps();
+        $("judgeDemoOverlay")?.classList.remove("hidden");
+        showToast("Judge Demo started — steps check off automatically as the real app reaches them.");
+        showPage("practice");
+    });
+
+    $("judgeDemoCloseBtn")?.addEventListener("click", () => {
+        $("judgeDemoOverlay")?.classList.add("hidden");
+    });
+
+    /* mode selection also counts as step 1 of the demo */
+    $$(".mode-card[data-mode]").forEach(button => {
+        button.addEventListener("click", () => markDemoStep("mode"));
+    });
+
+    /* clicking any mistake card counts as the "seek" step */
+    document.addEventListener("click", event => {
+        if (event.target.closest(".mistake-card")) markDemoStep("seek");
+    });
+}
+
+function renderJudgeDemoSteps() {
+    const list = $("judgeDemoSteps");
+    if (!list) return;
+
+    list.innerHTML = JUDGE_DEMO_STEPS.map(step => `
+        <li class="demo-step-item ${state.demoStepsDone[step.id] ? "done" : ""}">
+            <span class="demo-step-check">${state.demoStepsDone[step.id] ? "✓" : ""}</span>
+            <span>${escapeHTML(step.label)}</span>
+        </li>
+    `).join("");
+}
+
+function markDemoStep(id) {
+    if (!state.demoModeActive) return;
+    if (state.demoStepsDone[id]) return;
+    state.demoStepsDone[id] = true;
+    renderJudgeDemoSteps();
 }
 
 

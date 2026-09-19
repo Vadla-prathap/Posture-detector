@@ -272,18 +272,21 @@ select:hover { border-color: #51406c; }
 .mistake-card { width: 100%; display: grid; grid-template-columns: 65px 40px 1fr 45px; gap: 12px; align-items: center; background: var(--panel); color: white; border: 1px solid var(--border); border-radius: 14px; padding: 15px; text-align: left; transition: 0.2s; }
 button.mistake-card { cursor: pointer; }
 .mistake-card:hover { border-color: #51406c; background: #141416; }
+.mistake-card.mistake-highlight { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.25); }
 .mistake-time { color: var(--accent); font-family: monospace; font-size: 12px; }
 .mistake-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #351818; color: #fca5a5; font-weight: 800; }
 .mistake-content strong { display: block; margin-bottom: 4px; }
 .mistake-content span { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .mistake-content .mistake-fix { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); color: var(--green); font-size: 12.5px; line-height: 1.5; }
 .mistake-content .mistake-fix b { color: var(--green); }
+.mistake-content .mistake-metrics { display: block; margin-top: 6px; color: var(--accent); font-size: 12px; font-family: monospace; }
+.mistake-content .mistake-source-badge { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 999px; font-size: 9px; letter-spacing: 0.5px; font-weight: 700; background: #10241a; color: var(--green); border: 1px solid rgba(74, 222, 128, 0.3); }
 .mistake-arrow { text-align: center; color: var(--muted); }
 .mistake-speak-btn { border: 1px solid var(--border); background: var(--panel2); color: white; width: 38px; height: 38px; border-radius: 9px; cursor: pointer; transition: 0.2s; }
 .mistake-speak-btn:hover { border-color: var(--accent); }
 .empty-message { padding: 30px; text-align: center; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; color: var(--muted); line-height: 1.6; }
 
-.review-video-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 15px; }
+.review-video-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 15px; position: relative; }
 .review-video-card video { width: 100%; max-height: 600px; background: #000; border-radius: 10px; display: block; }
 .review-hint { color: var(--muted); font-size: 12px; padding: 12px 3px 0; }
 
@@ -345,10 +348,9 @@ body.senior-mode .senior-simplify { display: none !important; }
 .senior-toggle-btn.active { background: #1d1728; border-color: #30233f; color: white; }
 
 /* =========================================================
-   NEW — HACKATHON UPGRADE COMPONENTS
+   HACKATHON UPGRADE COMPONENTS (existing)
 ========================================================= */
 
-/* Automatic exercise recognition banner (over camera feed) */
 .recognition-banner {
     position: absolute;
     left: 14px;
@@ -388,7 +390,6 @@ body.senior-mode .senior-simplify { display: none !important; }
 .recognition-banner.low-confidence span#recognitionText { color: var(--yellow); }
 .recognition-banner.low-confidence .confidence-bar span { background: var(--yellow); }
 
-/* Real-time form HUD */
 .form-hud {
     position: absolute;
     left: 14px;
@@ -413,7 +414,6 @@ body.senior-mode .senior-simplify { display: none !important; }
 .hud-metric strong.bad { color: var(--red); }
 .hud-cue { grid-column: 1 / -1; font-size: 11px; color: var(--yellow); margin-top: 2px; transition: opacity 0.25s ease; }
 
-/* AI coach recommendation card */
 .coach-recommendation-card {
     background: linear-gradient(135deg, #1a1224, #12101a);
     border: 1px solid #3a2a55;
@@ -455,7 +455,6 @@ body.senior-mode .senior-simplify { display: none !important; }
     font-weight: 700;
 }
 
-/* Rep-complete flash */
 @keyframes repFlash {
     0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); }
     100% { box-shadow: 0 0 0 14px rgba(74, 222, 128, 0); }
@@ -470,6 +469,146 @@ body.senior-mode .senior-simplify { display: none !important; }
     .ai-split-status { grid-template-columns: 1fr; }
     #studio .stage-panel:last-child, #studio .stage-video { min-height: min(62vh, 520px); }
 }
+
+/* =========================================================
+   NEW — Feature 1: Dance compare-mode step indicator
+========================================================= */
+.compare-steps {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+.compare-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.compare-step.done { color: var(--green); }
+.compare-step.current { color: white; background: #21182d; border: 1px solid #4c3b65; }
+.compare-step-num {
+    width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center;
+    border-radius: 50%; background: #27272a; color: white; font-size: 11px; font-weight: 700;
+}
+.compare-step.current .compare-step-num { background: var(--accent2); }
+.compare-step.done .compare-step-num { background: var(--green); color: #052e10; }
+.compare-step-arrow { color: var(--border); font-weight: 700; }
+
+/* =========================================================
+   NEW — Feature 10: Device AI status panel
+========================================================= */
+.device-ai-panel {
+    margin-top: 15px;
+    padding: 14px 18px;
+    background: #101014;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+.device-ai-title { font-size: 10px; letter-spacing: 2px; color: var(--muted); margin-bottom: 10px; font-weight: 700; }
+.device-ai-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; }
+.device-ai-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.device-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #52525b; }
+.device-ai-row.on .device-dot { background: var(--green); box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.12); }
+.device-ai-row.on { color: white; }
+.device-ai-row.off .device-dot { background: #52525b; }
+.device-ai-row.error .device-dot { background: var(--red); }
+.device-ai-row.error { color: #fca5a5; }
+@media (max-width: 750px) {
+    .device-ai-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* =========================================================
+   NEW — Feature 12: Gemini failure banner
+========================================================= */
+.gemini-fail-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    background: #1a1508;
+    border: 1px solid #3a2f10;
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+}
+.gemini-fail-banner strong { color: var(--yellow); display: block; margin-bottom: 4px; }
+.gemini-fail-banner p { color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+/* =========================================================
+   NEW — Feature 7: Reference + user side-by-side review
+========================================================= */
+.review-compare-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.review-compare-layout .review-video-card { padding-top: 34px; }
+.stage-label.static-label { position: absolute; left: 14px; top: 10px; right: auto; color: var(--muted); text-shadow: none; }
+@media (max-width: 900px) {
+    .review-compare-layout { grid-template-columns: 1fr; }
+}
+
+/* =========================================================
+   NEW — Feature 20: Diagnostics panel
+========================================================= */
+.diagnostics-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+.diagnostics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin-bottom: 10px; }
+.diag-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; font-size: 12px; }
+.diag-row span { color: var(--muted); }
+.diag-row strong { color: var(--green); }
+.diag-row strong.diag-bad { color: var(--red); }
+.diag-row strong.diag-warn { color: var(--yellow); }
+@media (max-width: 750px) {
+    .diagnostics-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* =========================================================
+   NEW — Feature 8: Judge Demo overlay
+========================================================= */
+.demo-overlay {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 470;
+    width: min(340px, calc(100vw - 32px));
+    max-height: min(70vh, 560px);
+}
+.demo-panel {
+    background: var(--panel);
+    border: 1px solid #4c3b65;
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    max-height: min(70vh, 560px);
+    overflow: hidden;
+}
+.demo-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 1px solid var(--border); background: #15131a;
+}
+.demo-panel .review-hint { padding: 10px 16px 0; }
+.demo-steps { list-style: none; overflow-y: auto; padding: 10px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.demo-step-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border);
+    font-size: 12.5px; color: var(--muted); line-height: 1.5;
+}
+.demo-step-item.done { border-color: rgba(74, 222, 128, 0.35); color: white; }
+.demo-step-check { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); display: grid; place-items: center; font-size: 10px; margin-top: 1px; }
+.demo-step-item.done .demo-step-check { background: var(--green); border-color: var(--green); color: #052e10; }
 
 /* =========================================================
    TABLET / DESKTOP / MOBILE (unchanged from original)
@@ -510,6 +649,7 @@ body.senior-mode .senior-simplify { display: none !important; }
     .local-ai-status { font-size: 9px; }
     .chat-panel { right: 12px; left: 12px; width: auto; bottom: 150px; }
     .chat-fab { right: 16px; bottom: 80px; }
+    .demo-overlay { left: 12px; right: 12px; width: auto; bottom: 150px; }
 }
 
 @media (max-width: 520px) {
@@ -540,6 +680,10 @@ body.senior-mode .senior-simplify { display: none !important; }
     .mistake-content { grid-column: 1 / -1; }
     .mistake-arrow { display: none; }
     .mistake-speak-btn { grid-column: 2; grid-row: 1; }
+    .diagnostics-grid { grid-template-columns: 1fr; }
+    .device-ai-grid { grid-template-columns: 1fr; }
+    .compare-steps { justify-content: space-between; }
+    .compare-step strong { display: none; }
 }
 
 @media (max-width: 390px) {

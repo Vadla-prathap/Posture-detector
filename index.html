@@ -54,7 +54,10 @@
                     <h1>Train smarter.</h1>
                     <p>Your phone camera measures movement on-device. After the session, Gemini reviews the recording for deeper coaching.</p>
                 </div>
-                <button class="primary-btn" data-page-target="practice">Start Training →</button>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="secondary-btn" id="judgeDemoBtn">🎬 Judge Demo</button>
+                    <button class="primary-btn" data-page-target="practice">Start Training →</button>
+                </div>
             </div>
 
             <div class="hero-card">
@@ -127,6 +130,15 @@
                 </div>
             </div>
 
+            <!-- NEW: Dance compare-mode step indicator (Feature 1) -->
+            <div class="compare-steps hidden" id="compareStepsBar">
+                <div class="compare-step" id="compareStep1" data-step="1"><span class="compare-step-num">1</span><strong>Choose Reference</strong></div>
+                <div class="compare-step-arrow">→</div>
+                <div class="compare-step" id="compareStep2" data-step="2"><span class="compare-step-num">2</span><strong>Perform</strong></div>
+                <div class="compare-step-arrow">→</div>
+                <div class="compare-step" id="compareStep3" data-step="3"><span class="compare-step-num">3</span><strong>AI Compare</strong></div>
+            </div>
+
             <div class="selected-mode-banner">
                 <div class="selected-mode-icon" id="selectedModeIcon">💃</div>
                 <div><small>SELECTED MODE</small><strong id="selectedModeName">Dance</strong></div>
@@ -161,7 +173,7 @@
                         <input type="url" id="referenceUrlInput" placeholder="YouTube, Instagram, or direct video link (.mp4)" />
                         <button class="secondary-btn" id="loadUrlBtn">Load</button>
                     </div>
-                    <p class="review-hint" id="urlInputHint">Direct video links work fully, including Gemini comparison. YouTube links play for visual reference only. Instagram links are preview-only.</p>
+                    <p class="review-hint" id="urlInputHint">Direct video links work fully, including Gemini comparison and on-device joint comparison. YouTube links play for visual reference only. Instagram links are preview-only.</p>
 
                     <div class="video-preview hidden" id="videoPreview">
                         <video id="referenceVideo" controls playsinline></video>
@@ -303,6 +315,19 @@
                 </div>
             </div>
 
+            <!-- NEW: Device AI status panel (Feature 10) -->
+            <div class="device-ai-panel" id="deviceAiPanel">
+                <div class="device-ai-title">DEVICE AI</div>
+                <div class="device-ai-grid">
+                    <div class="device-ai-row" id="deviceRowCamera"><span class="device-dot"></span><span>Camera</span></div>
+                    <div class="device-ai-row" id="deviceRowPose"><span class="device-dot"></span><span>Pose Tracking — On Device</span></div>
+                    <div class="device-ai-row" id="deviceRowSkeleton"><span class="device-dot"></span><span>Skeleton — On Device</span></div>
+                    <div class="device-ai-row" id="deviceRowRecognition"><span class="device-dot"></span><span>Exercise Recognition — On Device</span></div>
+                    <div class="device-ai-row" id="deviceRowReps"><span class="device-dot"></span><span>Rep Counting — On Device</span></div>
+                    <div class="device-ai-row" id="deviceRowVoice"><span class="device-dot"></span><span>Voice Coach</span></div>
+                </div>
+            </div>
+
             <div class="ai-live-bar">
                 <div><span class="pulse"></span><strong>ON-DEVICE AI</strong><small id="onDeviceLiveStatus">● Active</small></div>
                 <div class="gemini-live-status"><strong>GEMINI REVIEW</strong><small id="geminiLiveStatus">● Ready</small></div>
@@ -367,6 +392,16 @@
                 </div>
             </div>
 
+            <!-- NEW: Gemini failure banner (Feature 12) -->
+            <div class="gemini-fail-banner hidden" id="geminiFailBanner">
+                <div>
+                    <strong>Gemini Deep Review: Unavailable</strong>
+                    <p id="geminiFailReason">Post-session AI review is temporarily unavailable.</p>
+                    <p class="review-hint" style="padding-top:6px;">Your live on-device score, reps, form metrics, on-device comparison and recording are preserved below.</p>
+                </div>
+                <button class="secondary-btn" id="retryGeminiBtn">↻ Retry Gemini Review</button>
+            </div>
+
             <div class="section-title"><h2>Session Intelligence</h2></div>
             <div class="stats-grid" id="workoutSummaryGrid">
                 <div class="stat-card"><div class="stat-icon">◎</div><div><span>Detected</span><strong id="summaryExercise">--</strong></div></div>
@@ -378,7 +413,7 @@
                 <div class="stat-card"><div class="stat-icon">△</div><div><span>Focus next</span><strong id="summaryWeakest">--</strong></div></div>
                 <div class="stat-card"><div class="stat-icon">⚠</div><div><span>Main issue</span><strong id="summaryMajorMistake">--</strong></div></div>
             </div>
-            <p class="review-hint" id="geminiStageNote">Stage 1 is on-device (pose, reps, form). Stage 2 is Gemini cloud review of the recording.</p>
+            <p class="review-hint" id="geminiStageNote">Stage 1 is on-device (pose, reps, form, reference comparison). Stage 2 is Gemini cloud review of the recording.</p>
 
             <!-- NEW: adaptive AI coach recommendation -->
             <div class="section-title"><h2>🤖 Your AI Coach Recommendation</h2></div>
@@ -394,16 +429,31 @@
                 <div class="breakdown-card"><span>Lower Body</span><strong id="lowerScore">--</strong><div class="progress-bar"><span id="lowerProgress"></span></div></div>
             </div>
 
+            <!-- NEW: On-device reference comparison (Feature 2 / 5) -->
             <div class="section-title feedback-section-title">
-                <div><h2>🔊 Mistakes &amp; AI Feedback</h2><p class="feedback-subtitle">Your AI coach explains exactly what to improve.</p></div>
+                <div><h2>📱 On-Device Reference Comparison</h2><p class="feedback-subtitle">Measured live from your camera + reference video, no cloud required.</p></div>
+                <span id="onDeviceMistakeCount">Not run</span>
+            </div>
+            <div class="mistake-list" id="onDeviceMistakeList"><div class="empty-message">No reference video was used for this session, or comparison hasn't run yet.</div></div>
+
+            <div class="section-title feedback-section-title">
+                <div><h2>🔊 Mistakes &amp; AI Feedback</h2><p class="feedback-subtitle">Gemini's cloud review explains exactly what to improve.</p></div>
                 <span id="mistakeCount">0 issues</span>
             </div>
             <div class="mistake-list" id="mistakeList"><div class="empty-message">No mistakes detected.</div></div>
 
+            <!-- NEW: Reference + User side-by-side review (Feature 7) -->
             <div class="section-title"><h2>Review Your Recording</h2></div>
-            <div class="review-video-card">
-                <video id="reviewVideo" controls playsinline></video>
-                <p class="review-hint">Click a mistake above to jump directly to that moment.</p>
+            <div class="review-compare-layout" id="reviewCompareLayout">
+                <div class="review-video-card review-reference-card hidden" id="reviewReferenceCard">
+                    <div class="stage-label static-label"><span>REFERENCE</span></div>
+                    <video id="reviewReferenceVideo" controls playsinline muted></video>
+                </div>
+                <div class="review-video-card">
+                    <div class="stage-label static-label"><span>YOUR PERFORMANCE</span></div>
+                    <video id="reviewVideo" controls playsinline></video>
+                    <p class="review-hint">Click a mistake above to jump directly to that moment.</p>
+                </div>
             </div>
         </section>
 
@@ -493,18 +543,36 @@
             <div class="page-header"><div><span class="eyebrow">SETTINGS</span><h1>Settings</h1><p>Configure your training experience.</p></div></div>
 
             <div class="settings-page">
-                <div class="setting-row"><div><strong>On-device AI</strong><small>MediaPipe pose, recognition, joint angles, reps and live voice cues stay on this phone.</small></div><div class="setting-status">LOCAL</div></div>
+                <div class="setting-row"><div><strong>On-device AI</strong><small>MediaPipe pose, recognition, joint angles, reps, reference comparison and live voice cues stay on this phone.</small></div><div class="setting-status">LOCAL</div></div>
                 <div class="setting-row"><div><strong>Gemini review</strong><small>After you stop recording, the session video is sent for deeper cloud analysis. Chat, fitness plan and adaptive recommendations also use Gemini.</small></div><div class="setting-status">CLOUD</div></div>
                 <div class="setting-row"><div><strong>Multilingual Coach</strong><small>English, Telugu and Hindi feedback.</small></div><div class="setting-status">3 LANGUAGES</div></div>
                 <div class="setting-row"><div><strong>Voice Feedback</strong><small>Browser text-to-speech reads AI corrections.</small></div><div class="setting-status">ON</div></div>
                 <div class="setting-row"><div><strong>Recording</strong><small>Practice recording remains in this browser session.</small></div><div class="setting-status">LOCAL</div></div>
                 <div class="setting-row"><div><strong>Live Skeleton Tracking</strong><small>Pose detection runs fully on-device in your browser (MediaPipe WASM) — landmark coordinates never leave your phone.</small></div><div class="setting-status">ON-DEVICE</div></div>
                 <div class="setting-row"><div><strong>Senior Mode</strong><small>Larger buttons, bigger text, simplified screens.</small></div><button class="option-btn" id="settingsSeniorToggle">Turn On</button></div>
+                <div class="setting-row"><div><strong>Developer Diagnostics</strong><small>Debug-only panel showing camera, pose, backend and Gemini status. Does not affect the training experience.</small></div><button class="option-btn" id="diagnosticsToggleBtn">Show</button></div>
+            </div>
+
+            <!-- NEW: Diagnostics panel (Feature 20) -->
+            <div class="diagnostics-panel hidden" id="diagnosticsPanel">
+                <div class="section-title" style="margin-top:0;"><h2 style="font-size:15px;">Diagnostics (debug only)</h2></div>
+                <div class="diagnostics-grid" id="diagnosticsGrid">
+                    <div class="diag-row"><span>Camera</span><strong id="diagCamera">--</strong></div>
+                    <div class="diag-row"><span>Pose Model</span><strong id="diagPoseModel">--</strong></div>
+                    <div class="diag-row"><span>Skeleton</span><strong id="diagSkeleton">--</strong></div>
+                    <div class="diag-row"><span>Exercise Recognition</span><strong id="diagRecognition">--</strong></div>
+                    <div class="diag-row"><span>Voice</span><strong id="diagVoice">--</strong></div>
+                    <div class="diag-row"><span>Recording</span><strong id="diagRecording">--</strong></div>
+                    <div class="diag-row"><span>Backend</span><strong id="diagBackend">--</strong></div>
+                    <div class="diag-row"><span>Gemini</span><strong id="diagGemini">--</strong></div>
+                    <div class="diag-row"><span>Reference</span><strong id="diagReference">--</strong></div>
+                </div>
+                <p class="review-hint">This panel reads real app state only. No sensitive keys are shown here or anywhere in frontend code.</p>
             </div>
 
             <div class="section-title"><h2>Privacy &amp; Data</h2></div>
             <div class="settings-page">
-                <div class="setting-row"><div><strong>Processed locally</strong><small>Pose tracking, skeleton overlay, joint angles, exercise recognition, rep counting and real-time form cues run in the browser. Live camera frames are not stored in localStorage.</small></div></div>
+                <div class="setting-row"><div><strong>Processed locally</strong><small>Pose tracking, skeleton overlay, joint angles, exercise recognition, rep counting, reference-vs-you comparison and real-time form cues run in the browser. Live camera frames are not stored in localStorage.</small></div></div>
                 <div class="setting-row"><div><strong>Sent to Gemini</strong><small>The recorded session video (and optional reference video) for post-session review, plus chatbot messages, fitness-plan requests and adaptive recommendation metrics. This is not a fully offline product.</small></div></div>
                 <div class="setting-row"><div><strong>What is stored on this device</strong><small>Scores, breakdown, mistakes and session metrics stay in this browser's local storage. Temporary server uploads are deleted after analysis.</small></div></div>
                 <div class="setting-row"><div><strong>Delete analysis history</strong><small>Removes all saved scores, breakdowns and mistakes from this device.</small></div><button class="remove-btn" id="deleteHistoryBtn">Delete</button></div>
@@ -519,6 +587,18 @@
 <!-- ================= TOAST ================= -->
 <div class="toast" id="toast"><strong>MovementCoach</strong><p id="toastMessage">Ready</p></div>
 
+<!-- ================= JUDGE DEMO OVERLAY (Feature 8) ================= -->
+<div class="demo-overlay hidden" id="judgeDemoOverlay">
+    <div class="demo-panel">
+        <div class="demo-panel-header">
+            <strong>🎬 Judge Demo Checklist</strong>
+            <button class="icon-btn" id="judgeDemoCloseBtn">✕</button>
+        </div>
+        <p class="review-hint" style="padding:0 0 10px;">Follow these steps live. Each one checks itself off automatically as the real app reaches that state — nothing here is simulated.</p>
+        <ol class="demo-steps" id="judgeDemoSteps"></ol>
+    </div>
+</div>
+
 <!-- ================= AI CHATBOT WIDGET ================= -->
 <button class="chat-fab" id="chatFab" aria-label="Open AI Coach chat">💬</button>
 <div class="chat-panel hidden" id="chatPanel">
@@ -527,7 +607,7 @@
         <div class="chat-bubble chat-bot">Hi! Ask me about your training, form tips, or how to use the app — I can also see your latest workout stats. You can type or use the mic.</div>
     </div>
     <div class="chat-input-row">
-        <button class="icon-btn" id="chatMicBtn" title="Speak your question">🎤</button>
+        <button class="icon-btn" id="chatMicBtn" title="Speak your question">🎙️</button>
         <input type="text" id="chatInput" placeholder="Ask the AI coach..." />
         <button class="primary-btn" id="chatSendBtn">Send</button>
     </div>
