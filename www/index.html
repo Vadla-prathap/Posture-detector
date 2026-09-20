@@ -139,6 +139,12 @@
                 <div class="compare-step" id="compareStep3" data-step="3"><span class="compare-step-num">3</span><strong>AI Compare</strong></div>
             </div>
 
+            <!-- NEW — Section 10: wellness/health safety note, always shown for this mode -->
+            <div class="senior-safety-note hidden" id="wellnessSafetyNote">
+                <strong>Wellness guidance, not medical diagnosis</strong>
+                <p>This tool provides movement and wellness guidance, not medical diagnosis. If you experience pain, dizziness, or discomfort, stop the exercise and seek appropriate professional advice.</p>
+            </div>
+
             <div class="selected-mode-banner">
                 <div class="selected-mode-icon" id="selectedModeIcon">💃</div>
                 <div><small>SELECTED MODE</small><strong id="selectedModeName">Dance</strong></div>
@@ -315,17 +321,50 @@
                 </div>
             </div>
 
-            <!-- NEW: Device AI status panel (Feature 10) -->
+            <!-- NEW: Device AI status panel (Feature 10), extended per Section 3 checklist -->
             <div class="device-ai-panel" id="deviceAiPanel">
-                <div class="device-ai-title">DEVICE AI</div>
+                <div class="device-ai-title">ON-DEVICE</div>
                 <div class="device-ai-grid">
                     <div class="device-ai-row" id="deviceRowCamera"><span class="device-dot"></span><span>Camera</span></div>
                     <div class="device-ai-row" id="deviceRowPose"><span class="device-dot"></span><span>Pose Tracking — On Device</span></div>
                     <div class="device-ai-row" id="deviceRowSkeleton"><span class="device-dot"></span><span>Skeleton — On Device</span></div>
                     <div class="device-ai-row" id="deviceRowRecognition"><span class="device-dot"></span><span>Exercise Recognition — On Device</span></div>
                     <div class="device-ai-row" id="deviceRowReps"><span class="device-dot"></span><span>Rep Counting — On Device</span></div>
+                    <div class="device-ai-row" id="deviceRowForm"><span class="device-dot"></span><span>Form Analysis — On Device</span></div>
+                    <div class="device-ai-row" id="deviceRowComparison"><span class="device-dot"></span><span>Reference Comparison — On Device</span></div>
                     <div class="device-ai-row" id="deviceRowVoice"><span class="device-dot"></span><span>Voice Coach</span></div>
                 </div>
+                <div class="device-ai-title" style="margin-top:12px;">CLOUD / OPTIONAL</div>
+                <div class="device-ai-grid">
+                    <div class="device-ai-row" id="deviceRowGemini"><span class="device-dot"></span><span>☁ Gemini Deep Review</span></div>
+                </div>
+            </div>
+
+            <!-- NEW — Section 8: live Performance Monitor (real measured values only) -->
+            <div class="device-ai-panel" id="performancePanel">
+                <div class="device-ai-title">PERFORMANCE (MEASURED)</div>
+                <div class="perf-grid">
+                    <div class="perf-stat"><span>Mode</span><strong id="perfMode">FULL</strong></div>
+                    <div class="perf-stat"><span>Detection FPS</span><strong id="perfFps">measuring…</strong></div>
+                    <div class="perf-stat"><span>Min / Max FPS</span><strong id="perfMinMax">--</strong></div>
+                    <div class="perf-stat"><span>Frames</span><strong id="perfFrames">--</strong></div>
+                    <div class="perf-stat"><span>Camera Resolution</span><strong id="perfResolution">--</strong></div>
+                </div>
+                <p class="review-hint">Detection FPS is how often the on-device pose model actually processes a frame (measured, not estimated). If it drops, the app automatically steps down to Balanced or Power Saver sampling to stay responsive.</p>
+            </div>
+
+            <!-- NEW: honest degraded-mode banner (shown only if the pose engine fails to load) -->
+            <div class="pose-degraded-banner hidden" id="poseDegradedBanner">
+                <strong>⚠ Live pose features unavailable this session</strong>
+                <p>Skeleton, rep counting, form scoring, live voice cues and on-device reference comparison all need the on-device pose model, which failed to load (usually a blocked/slow connection to the MediaPipe CDN). You can still record and get a full Gemini cloud review after you stop.</p>
+            </div>
+
+            <!-- NEW — Section 2: Validation & Accuracy quick toggle (full workflow lives in Settings → Developer Diagnostics) -->
+            <div class="validation-toggle-row">
+                <label class="validation-toggle-label">
+                    <input type="checkbox" id="validationModeToggle" />
+                    <span>Track this session for Validation &amp; Accuracy (enter a manual rep count after stopping, to compare against the AI's count)</span>
+                </label>
             </div>
 
             <div class="ai-live-bar">
@@ -430,6 +469,9 @@
             </div>
 
             <!-- NEW: On-device reference comparison (Feature 2 / 5) -->
+            <!-- NEW — Section 2: Validation & Accuracy card (only shown for sessions tracked with the toggle) -->
+            <div class="upload-card validation-card hidden" id="validationCard"></div>
+
             <div class="section-title feedback-section-title">
                 <div><h2>📱 On-Device Reference Comparison</h2><p class="feedback-subtitle">Measured live from your camera + reference video, no cloud required.</p></div>
                 <span id="onDeviceMistakeCount">Not run</span>
@@ -532,6 +574,11 @@
                 <div class="empty-message">No nutrition entries yet. Nutrition tracking is not part of this build — once food entries are logged, an "AI Estimate" summary will appear here.</div>
             </div>
 
+            <div class="section-title"><h2>🧭 My Movement Pattern</h2></div>
+            <div class="upload-card" id="movementPatternCard">
+                <div class="empty-message">Complete a few sessions to see personalized movement-pattern insights based on your own history.</div>
+            </div>
+
             <div class="section-title"><h2>🏆 Achievements</h2></div>
             <div class="stats-grid" id="achievementsGrid">
                 <div class="empty-message">Complete a session to start unlocking achievements.</div>
@@ -566,8 +613,21 @@
                     <div class="diag-row"><span>Backend</span><strong id="diagBackend">--</strong></div>
                     <div class="diag-row"><span>Gemini</span><strong id="diagGemini">--</strong></div>
                     <div class="diag-row"><span>Reference</span><strong id="diagReference">--</strong></div>
+                    <div class="diag-row"><span>On-Device Comparison</span><strong id="diagOnDeviceComparison">--</strong></div>
+                    <div class="diag-row"><span>Network</span><strong id="diagNetwork">--</strong></div>
+                    <div class="diag-row"><span>Performance</span><strong id="diagPerformance">--</strong></div>
                 </div>
                 <p class="review-hint">This panel reads real app state only. No sensitive keys are shown here or anywhere in frontend code.</p>
+            </div>
+
+            <div class="section-title"><h2>Phone ↔ Laptop Workflow</h2></div>
+            <div class="upload-card">
+                <p class="review-hint" style="padding-top:0;">This web app has no direct Office Kit API integration \u2014 that would require native access this browser page doesn't have. It's built to work naturally alongside the official Office Kit screen-mirroring / file-transfer workflow during the event: mirror this phone's screen to a laptop for the live judge view, and use the exports below to carry results between devices afterward.</p>
+                <div class="office-kit-actions">
+                    <button class="secondary-btn" id="officeKitReportBtn">⬇ Export Session Report</button>
+                    <button class="secondary-btn" id="officeKitValidationBtn">⬇ Export Validation Report</button>
+                </div>
+                <p class="review-hint">Neither button claims a HackTracker or Office Kit score \u2014 they just produce a plain-text file you can transfer by the official event workflow.</p>
             </div>
 
             <div class="section-title"><h2>Privacy &amp; Data</h2></div>
@@ -596,6 +656,8 @@
         </div>
         <p class="review-hint" style="padding:0 0 10px;">Follow these steps live. Each one checks itself off automatically as the real app reaches that state — nothing here is simulated.</p>
         <ol class="demo-steps" id="judgeDemoSteps"></ol>
+        <button class="secondary-btn" id="judgeEvidenceToggleBtn" style="margin:0 16px 12px; width:calc(100% - 32px);">📋 Show Judge Evidence (live runtime data)</button>
+        <div class="judge-evidence hidden" id="judgeEvidencePanel"></div>
     </div>
 </div>
 

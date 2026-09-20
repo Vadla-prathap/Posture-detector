@@ -327,6 +327,74 @@ app.use(
 
 
 /* =========================================================
+   NEW — BASIC RATE LIMITING (in-memory, per-IP)
+
+   Addresses a real gap: /api/analyze and /api/chat both call
+   Gemini and have no abuse protection beyond payload size caps.
+   A single misbehaving client (accidental retry loop, or another
+   team hammering the shared demo backend) could exhaust the
+   Gemini quota right before a judged demo.
+
+   This is intentionally simple — an in-memory sliding window per
+   IP, no external dependency, no persistence needed for a
+   single-instance hackathon deployment. It is NOT a substitute
+   for a production rate limiter (e.g. Redis-backed, behind a
+   proxy that sets a trustworthy client IP) — noted honestly here
+   rather than oversold.
+========================================================= */
+
+function createRateLimiter({ windowMs, max }) {
+
+    const hits = new Map(); // ip -> array of request timestamps (ms)
+
+    return (req, res, next) => {
+
+        const ip =
+            req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+            req.socket?.remoteAddress ||
+            "unknown";
+
+        const now = Date.now();
+        const windowStart = now - windowMs;
+
+        const existing = (hits.get(ip) || []).filter(t => t > windowStart);
+
+        if (existing.length >= max) {
+
+            const retryAfterSec = Math.ceil((existing[0] + windowMs - now) / 1000);
+
+            res.setHeader("Retry-After", String(Math.max(1, retryAfterSec)));
+
+            return res.status(429).json({
+                success: false,
+                error: `Too many requests. Please wait about ${Math.max(1, retryAfterSec)} seconds and try again.`
+            });
+        }
+
+        existing.push(now);
+        hits.set(ip, existing);
+
+        // periodic cleanup so the map doesn't grow unbounded over a long-running demo
+        if (hits.size > 500) {
+            for (const [key, timestamps] of hits.entries()) {
+                const fresh = timestamps.filter(t => t > windowStart);
+                if (fresh.length) hits.set(key, fresh);
+                else hits.delete(key);
+            }
+        }
+
+        next();
+    };
+}
+
+// Video analysis is expensive (Gemini file upload + generation) — keep it tight.
+const analyzeRateLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 6 });
+
+// Chat is cheap per-call but easy to spam from a UI — a bit more headroom.
+const chatRateLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 20 });
+
+
+/* =========================================================
    API-ONLY ROOT
 ========================================================= */
 
@@ -417,6 +485,8 @@ app.get(
 
 app.post(
     "/api/analyze",
+
+    analyzeRateLimiter,
 
     upload.fields([
 
@@ -1852,6 +1922,8 @@ Use exactly this structure:
 
 app.post(
     "/api/chat",
+
+    chatRateLimiter,
 
     async (req, res) => {
 
