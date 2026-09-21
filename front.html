@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#09090b">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MoveCoach">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" href="icons/icon-192.png">
     <title>AI Movement Coach</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -279,6 +286,16 @@
                 <div class="studio-timer" id="practiceTimer">00:00</div>
             </div>
 
+            <!-- NEW: consolidated live metrics bar -->
+            <div class="live-metrics-bar">
+                <div class="live-metric"><span>POSE FPS</span><strong id="metricFps">--</strong></div>
+                <div class="live-metric"><span>CONFIDENCE</span><strong id="metricConfidence">--</strong></div>
+                <div class="live-metric"><span>FORM SCORE</span><strong id="metricFormScore">--</strong></div>
+                <div class="live-metric"><span>PROCESSING</span><strong id="metricOnDevice">ON-DEVICE</strong></div>
+                <div class="live-metric"><span>BATTERY</span><strong id="metricBattery">n/a</strong></div>
+                <button class="option-btn" id="powerSaverToggle" style="flex:0 0 auto; padding:6px 10px; font-size:10px;">⚡ Power Saver</button>
+            </div>
+
             <div class="practice-stage">
                 <div class="stage-panel" id="referencePanel">
                     <div class="stage-label"><span>REFERENCE</span><span id="referenceStatus">READY</span></div>
@@ -315,7 +332,11 @@
 
                     <p class="camera-quality-hint hidden" id="cameraQualityHint"></p>
 
-                    <div class="stage-empty camera-empty" id="cameraEmpty"><span>◎</span><p>Camera Preview</p></div>
+                    <div class="stage-empty camera-empty" id="cameraEmpty">
+                        <span>◎</span><p>Camera Preview</p>
+                        <button class="secondary-btn hidden" id="fallbackVideoBtn" style="margin-top:14px;">🎬 Run Full Demo with a Video File</button>
+                        <input type="file" id="fallbackVideoInput" accept="video/*" hidden>
+                    </div>
                     <div class="camera-indicator hidden" id="recordingIndicator"><span></span>REC</div>
                     <div class="live-feedback" id="liveFeedback">Camera ready</div>
                 </div>
@@ -367,6 +388,19 @@
                 </label>
             </div>
 
+            <!-- NEW — Transparent Form Scoring Engine: shows the exact real
+                 thresholds computeFormScore() uses for the current exercise -->
+            <div class="device-ai-panel" id="formRulesPanel">
+                <div class="device-ai-title">FORM SCORING RULES (live, per exercise)</div>
+                <div id="formRulesBody"><p class="review-hint" style="padding:0;">Waiting for an exercise to be recognized…</p></div>
+            </div>
+
+            <!-- NEW — Technical Proof panel (collapsible) -->
+            <div class="device-ai-panel">
+                <button class="tech-proof-toggle" id="techProofToggle">🔬 Technical Proof <span>▾</span></button>
+                <div class="tech-proof-body hidden" id="techProofBody"></div>
+            </div>
+
             <div class="ai-live-bar">
                 <div><span class="pulse"></span><strong>ON-DEVICE AI</strong><small id="onDeviceLiveStatus">● Active</small></div>
                 <div class="gemini-live-status"><strong>GEMINI REVIEW</strong><small id="geminiLiveStatus">● Ready</small></div>
@@ -397,6 +431,7 @@
                     <p id="analysisDescription">Live on-device metrics plus Gemini session review.</p>
                 </div>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="secondary-btn" id="analysisDashboardBtn">⌂ Dashboard</button>
                     <button class="secondary-btn" id="downloadReportBtn">⬇ Download Report</button>
                     <button class="primary-btn" id="analysisPracticeAgain">Practice Again</button>
                 </div>
@@ -453,6 +488,9 @@
                 <div class="stat-card"><div class="stat-icon">⚠</div><div><span>Main issue</span><strong id="summaryMajorMistake">--</strong></div></div>
             </div>
             <p class="review-hint" id="geminiStageNote">Stage 1 is on-device (pose, reps, form, reference comparison). Stage 2 is Gemini cloud review of the recording.</p>
+
+            <!-- NEW: "What improved" — real comparison vs your previous session for this exercise -->
+            <div class="upload-card" id="whatImprovedCard" style="margin-top:20px;"></div>
 
             <!-- NEW: adaptive AI coach recommendation -->
             <div class="section-title"><h2>🤖 Your AI Coach Recommendation</h2></div>
@@ -646,6 +684,18 @@
 
 <!-- ================= TOAST ================= -->
 <div class="toast" id="toast"><strong>MovementCoach</strong><p id="toastMessage">Ready</p></div>
+
+<!-- NEW: persistent "running fully on-device" indicator during training -->
+<div class="on-device-badge" id="onDeviceBadge"><span class="pulse" style="width:6px;height:6px;"></span> ON-DEVICE AI ACTIVE</div>
+
+<!-- NEW: rotate-to-portrait overlay — CSS-only via orientation media query,
+     so it works even where the Screen Orientation Lock API is unsupported
+     (e.g. iOS Safari). Only ever shown during an active studio session. -->
+<div class="rotate-overlay" id="rotateOverlay">
+    <div class="rotate-icon">📱</div>
+    <strong>Rotate to portrait</strong>
+    <p>Training works best in portrait so the camera frame matches the reference layout.</p>
+</div>
 
 <!-- ================= JUDGE DEMO OVERLAY (Feature 8) ================= -->
 <div class="demo-overlay hidden" id="judgeDemoOverlay">

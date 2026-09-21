@@ -597,6 +597,69 @@ body.senior-mode .senior-simplify { display: none !important; }
 .office-kit-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
 
 /* =========================================================
+   NEW — Technical Proof + Form Scoring Rules panels
+========================================================= */
+.tech-proof-toggle {
+    width: 100%; text-align: left; background: none; border: 0; color: white;
+    font-size: 10px; letter-spacing: 2px; font-weight: 700; padding: 0;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.tech-proof-body { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.tech-proof-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; }
+.tech-proof-row span { color: var(--muted); }
+.tech-proof-row strong { color: white; text-align: right; }
+.form-rule-line { display: flex; align-items: baseline; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.form-rule-line:last-child { border-bottom: 0; }
+.form-rule-line .form-rule-name { color: var(--muted); min-width: 90px; }
+.form-rule-line .form-rule-text { color: white; }
+
+/* =========================================================
+   NEW — Consolidated live metrics bar
+========================================================= */
+.live-metrics-bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: #101014; border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px 14px; margin-bottom: 14px;
+}
+.live-metric { display: flex; flex-direction: column; gap: 2px; }
+.live-metric span { font-size: 8px; letter-spacing: 1px; color: var(--muted); }
+.live-metric strong { font-size: 13px; color: white; }
+#powerSaverToggle.active { border-color: var(--yellow); color: var(--yellow); background: #1a1508; }
+@media (max-width: 750px) {
+    .live-metrics-bar { gap: 10px; padding: 8px 10px; }
+    .live-metric strong { font-size: 11px; }
+}
+
+/* =========================================================
+   NEW — Portrait-first studio experience
+========================================================= */
+.rotate-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 600;
+    background: #09090b;
+    flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 40px;
+    gap: 10px;
+}
+.rotate-icon { font-size: 48px; animation: rotateHint 1.6s ease-in-out infinite; }
+@keyframes rotateHint { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
+.rotate-overlay p { color: var(--muted); max-width: 320px; line-height: 1.6; font-size: 13px; }
+@media (orientation: landscape) and (max-width: 900px) {
+    body.studio-active .rotate-overlay { display: flex; }
+}
+
+/* NEW — persistent on-device badge */
+.on-device-badge {
+    position: fixed; top: 14px; right: 14px; z-index: 460;
+    display: none; align-items: center; gap: 6px;
+    background: rgba(9, 9, 11, 0.85); border: 1px solid rgba(74, 222, 128, 0.35);
+    color: var(--green); font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+    padding: 6px 10px; border-radius: 999px; backdrop-filter: blur(6px);
+}
+body.studio-active .on-device-badge { display: flex; }
+@media (max-width: 750px) { .on-device-badge { top: 8px; right: 8px; font-size: 9px; } }
+
+/* =========================================================
    NEW — Feature 7: Reference + user side-by-side review
 ========================================================= */
 .review-compare-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

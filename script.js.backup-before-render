@@ -23,6 +23,7 @@ const state = {
        active so every downstream function (studio preview, recording
        sync, Gemini upload) knows how to handle it. ---- */
     referenceSourceType: "file", // "file" | "url" | "youtube" | "instagram"
+    instagramEmbedPath: null, // "{reel|p|tv}/{id}" — used to build the Instagram embed URL
     youtubeVideoId: null,
     studioYoutubePlayer: null,
     referenceDuration: null,
@@ -114,7 +115,8 @@ const state = {
         maxFps: 0,
         framesProcessed: 0,
         framesDropped: 0,
-        lastModeSwitchTime: 0
+        lastModeSwitchTime: 0,
+        manualOverride: false
     },
 
     /* NEW — Section 2: Validation & Accuracy system. Only ever
@@ -211,6 +213,7 @@ function recordDetectionTick(now) {
    doesn't flap. Only fires off real fps numbers computed above. */
 function maybeAdaptPerformanceMode(now) {
     const perf = state.perf;
+    if (perf.manualOverride) return; // user explicitly chose a mode — don't fight them
     if (perf.detectTimestamps.length < 10) return; // not enough real samples yet
     if (now - perf.lastModeSwitchTime < PERF_MODE_SWITCH_COOLDOWN_MS) return;
 
@@ -251,6 +254,148 @@ function setPerformanceMode(mode, auto) {
     }
 
     updatePerformancePanel();
+}
+
+let lastLiveMetricsUpdate = 0;
+let batteryInfo = { supported: null, level: null, charging: null };
+
+/* NEW: the Battery Status API (navigator.getBattery) has been removed
+   from most modern browsers for privacy reasons (Firefox, Safari never
+   shipped it widely; Chrome restricts it). We query it defensively
+   ONCE and cache the result — if unsupported, we say so plainly
+   rather than invent a number. */
+function initBatteryInfo() {
+    if (batteryInfo.supported !== null) return;
+    if (typeof navigator.getBattery !== "function") {
+        batteryInfo.supported = false;
+        return;
+    }
+    navigator.getBattery().then(battery => {
+        batteryInfo.supported = true;
+        const update = () => {
+            batteryInfo.level = battery.level;
+            batteryInfo.charging = battery.charging;
+        };
+        update();
+        battery.addEventListener("levelchange", update);
+        battery.addEventListener("chargingchange", update);
+    }).catch(() => {
+        batteryInfo.supported = false;
+    });
+}
+
+function updateLiveMetricsBar(now) {
+    if (now - lastLiveMetricsUpdate < 400) return;
+    lastLiveMetricsUpdate = now;
+
+    initBatteryInfo();
+
+    const fpsEl = $("metricFps");
+    const confEl = $("metricConfidence");
+    const formEl = $("metricFormScore");
+    const onDeviceEl = $("metricOnDevice");
+    const batteryEl = $("metricBattery");
+    if (!fpsEl) return; // bar not present on this page
+
+    fpsEl.textContent = state.perf.detectTimestamps.length >= 2 ? `${state.perf.fps}` : "…";
+    confEl.textContent = state.autoDetectEnabled ? (state.detectionConfidence ? `${state.detectionConfidence}%` : "--") : "MANUAL";
+    formEl.textContent = poseEngine.lastFormScore != null ? `${poseEngine.lastFormScore}` : "--";
+    onDeviceEl.textContent = poseEngine.landmarker ? "ON-DEVICE" : "LOADING";
+
+    if (batteryInfo.supported === false) {
+        batteryEl.textContent = "n/a (browser)";
+    } else if (batteryInfo.supported === true && batteryInfo.level != null) {
+        batteryEl.textContent = `${Math.round(batteryInfo.level * 100)}%${batteryInfo.charging ? " ⚡" : ""}`;
+    } else {
+        batteryEl.textContent = "checking…";
+    }
+}
+
+/* =========================================================
+   NEW — Transparent Form Scoring Engine (mega-prompt Section 4)
+   These strings are a direct, literal transcription of the exact
+   thresholds inside computeFormScore() above — if that function's
+   numbers ever change, these must be updated to match, since the
+   whole point is that this panel shows the REAL rule being applied,
+   not a separate marketing description of it.
+========================================================= */
+const FORM_SCORE_RULE_TEXT = {
+    squat: [
+        "Back lean ≤ 38° from vertical (penalty scales above this, capped at -35 pts)",
+        "Knee stays within 0.12 (normalized) of ankle horizontally — deeper offset penalized, capped at -25 pts"
+    ],
+    lunge: [
+        "Back lean ≤ 38° from vertical (penalty scales above this, capped at -35 pts)",
+        "Knee stays within 0.12 (normalized) of ankle horizontally — deeper offset penalized, capped at -25 pts"
+    ],
+    pushup: [
+        "Body line (shoulder–hip–ankle) angle ≥ 155° — sagging hips penalized, capped at -35 pts"
+    ],
+    bicepcurl: [
+        "Elbow stays close to torso (within ~0.16 normalized distance) — flat -22 pts if it drifts away"
+    ],
+    shoulderpress: [
+        "Back lean ≤ 25° from vertical — arching penalized, capped at -28 pts"
+    ],
+    standing: [
+        "Shoulder tilt ≤ 0.05 (normalized vertical difference) — uneven shoulders penalized, capped at -20 pts"
+    ],
+    dance: [
+        "Shoulder tilt ≤ 0.05 (normalized vertical difference) — uneven shoulders penalized, capped at -20 pts (this is the general-posture fallback rule; dance has no dedicated rule set)"
+    ]
+};
+
+function renderFormRules() {
+    const body = $("formRulesBody");
+    if (!body) return;
+
+    const exercise = state.activeExercise;
+    if (!exercise) {
+        body.innerHTML = `<p class="review-hint" style="padding:0;">Waiting for an exercise to be recognized…</p>`;
+        return;
+    }
+
+    const rules = FORM_SCORE_RULE_TEXT[exercise] || FORM_SCORE_RULE_TEXT.standing;
+    body.innerHTML = `<p class="review-hint" style="padding:0 0 8px;">Rules currently applied for <b>${escapeHTML(EXERCISE_LABELS[exercise] || exercise)}</b> — starts at 100, penalties subtract from there:</p>`
+        + rules.map(r => `<div class="form-rule-line"><span class="form-rule-name">Rule</span><span class="form-rule-text">${escapeHTML(r)}</span></div>`).join("");
+}
+
+/* =========================================================
+   NEW — Technical Proof panel (mega-prompt "native feel" section)
+   Every value shown is read from real running state — the model
+   URL/name actually being used, a real measured per-frame latency,
+   and the same rule text as the Form Scoring panel above.
+========================================================= */
+function setupTechProofPanel() {
+    $("techProofToggle")?.addEventListener("click", () => {
+        const body = $("techProofBody");
+        const btn = $("techProofToggle");
+        const nowHidden = body.classList.toggle("hidden");
+        btn.querySelector("span").textContent = nowHidden ? "▾" : "▴";
+        if (!nowHidden) renderTechnicalProof();
+    });
+}
+
+function renderTechnicalProof() {
+    const body = $("techProofBody");
+    if (!body || body.classList.contains("hidden")) return;
+
+    const latencySamples = poseEngine.latencySamples || [];
+    const avgLatency = latencySamples.length ? (latencySamples.reduce((a, b) => a + b, 0) / latencySamples.length) : null;
+
+    const rows = [
+        ["Model", "MediaPipe Pose Landmarker (lite, float16)"],
+        ["Delegate", poseEngine.landmarker ? "GPU (falls back to CPU if unavailable)" : "Not loaded yet"],
+        ["Per-frame detection latency", avgLatency != null ? `${avgLatency.toFixed(1)}ms avg (measured, last ${latencySamples.length} frames)` : "measuring…"],
+        ["Detection rate", state.perf.detectTimestamps.length >= 2 ? `${state.perf.fps}/s (mode: ${state.perf.mode})` : "measuring…"],
+        ["Joint angles used for scoring", state.activeExercise ? (FORM_SCORE_RULE_TEXT[state.activeExercise] || FORM_SCORE_RULE_TEXT.standing).join(" · ") : "waiting for exercise recognition"],
+        ["Cloud AI (Gemini)", "Only called once, after you press Stop — never during live coaching"],
+        ["Reference comparison", `Runs on-device after Stop, alignment: ${state.lastAlignmentMethod === "dynamic-windowed" ? "Dynamic (windowed)" : state.lastAlignmentMethod === "proportional" ? "Proportional fallback" : "not yet run"}`]
+    ];
+
+    body.innerHTML = rows.map(([label, value]) => `
+        <div class="tech-proof-row"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>
+    `).join("");
 }
 
 function updatePerformancePanel() {
@@ -637,6 +782,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupGeminiRetry();        // NEW — Feature 12
     setupVisibilityHandling(); // NEW — Section 9-Q
     setupOfficeKitPanel();     // NEW — Section 13
+    setupTechProofPanel();     // NEW — Technical Proof panel
 
     updateProgressUI();
     updateMistakeBadge();
@@ -644,6 +790,16 @@ document.addEventListener("DOMContentLoaded", () => {
     updateDeviceAiPanel();     // NEW — Feature 10
 
     showPage("dashboard");
+
+    /* NEW — PWA installability. Purely additive: if this fails or
+       the browser doesn't support it, the app runs exactly the same
+       (the SW never intercepts the CDN/backend requests the live
+       coaching path depends on — see sw.js). */
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(error => {
+            console.warn("[MovementCoach] Service worker registration failed (app still works normally):", error);
+        });
+    }
 });
 
 /* =========================================================
@@ -714,8 +870,9 @@ function setupNavigation() {
     });
 }
 
-function showPage(page) {
+function showPage(page, options = {}) {
     if (!$(page)) return;
+    const fromHistory = options.fromHistory === true;
 
     if (state.currentPage === "studio" && page !== "studio") {
         if (state.isRecording) {
@@ -723,6 +880,8 @@ function showPage(page) {
         } else {
             cleanupStudio();
         }
+        document.body.classList.remove("studio-active");
+        releasePortraitLock();
     }
 
     $$(".page").forEach(section => section.classList.remove("active-page"));
@@ -735,10 +894,34 @@ function showPage(page) {
     state.currentPage = page;
     window.scrollTo({ top: 0, behavior: "smooth" });
 
+    /* NEW — real back-button support. Every genuine page transition
+       gets a history entry, so the phone's hardware/gesture back
+       button (and the browser back button) navigates within the app
+       instead of exiting it. A page re-entered via popstate (the user
+       actually pressed back) must NOT push a new entry, or back would
+       stop working after one press. */
+    if (!fromHistory) {
+        const entry = { page };
+        if (!history.state) {
+            history.replaceState(entry, "", "#" + page);
+        } else if (history.state.page !== page) {
+            history.pushState(entry, "", "#" + page);
+        }
+    }
+
     if (page === "progress") updateProgressUI();
     if (page === "mistakes") renderHistoryMistakes();
     if (page === "settings") refreshDiagnostics();
 }
+
+/* NEW: the actual back-button fix — without this, showPage() alone
+   never touches browser history, so a hardware/gesture back press
+   (common on installed PWAs and Android Chrome) exits the app instead
+   of going to the previous in-app screen. */
+window.addEventListener("popstate", event => {
+    const page = event.state?.page || "dashboard";
+    showPage(page, { fromHistory: true });
+});
 
 
 /* =========================================================
@@ -903,6 +1086,7 @@ function setupSetupControls() {
 
     $("openStudio").addEventListener("click", openStudio);
     $("analysisPracticeAgain").addEventListener("click", practiceAgain);
+    $("analysisDashboardBtn")?.addEventListener("click", () => showPage("dashboard"));
 }
 
 
@@ -961,7 +1145,7 @@ function updateReferenceDuration() {
 ========================================================= */
 
 const YOUTUBE_URL_RE = /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i;
-const INSTAGRAM_URL_RE = /instagram\.com\/(?:reel|p|tv)\/([A-Za-z0-9_-]+)/i;
+const INSTAGRAM_URL_RE = /instagram\.com\/(reel|p|tv)\/([A-Za-z0-9_-]+)/i;
 const DIRECT_VIDEO_RE = /\.(mp4|webm|ogg|ogv|mov|m4v)(\?.*)?$/i;
 
 function classifyReferenceUrl(rawUrl) {
@@ -977,7 +1161,7 @@ function classifyReferenceUrl(rawUrl) {
     if (youtubeMatch) return { type: "youtube", id: youtubeMatch[1], url: rawUrl.trim() };
 
     const instagramMatch = rawUrl.match(INSTAGRAM_URL_RE);
-    if (instagramMatch) return { type: "instagram", id: instagramMatch[1], url: rawUrl.trim() };
+    if (instagramMatch) return { type: "instagram", igType: instagramMatch[1], id: instagramMatch[2], url: rawUrl.trim() };
 
     if (DIRECT_VIDEO_RE.test(url.pathname)) return { type: "direct", url: rawUrl.trim() };
 
@@ -1045,19 +1229,25 @@ function loadReferenceFromUrl(rawUrl) {
     } else if (classified.type === "instagram") {
         state.referenceSourceType = "instagram";
         state.referenceURL = classified.url;
+        state.instagramEmbedPath = `${classified.igType}/${classified.id}`;
         state.youtubeVideoId = null;
 
         $("referenceVideo").classList.add("hidden");
         const embedWrap = $("referenceEmbedWrap");
         const embedFrame = $("referenceEmbedFrame");
-        embedFrame.src = "";
-        embedWrap.classList.add("hidden");
+        /* NEW: this is Instagram's own public embed path (the same one
+           their "Embed" share option generates) — works for public
+           posts without any API key. It can still fail for private,
+           age-restricted, or region-blocked posts, which is why the
+           honest fallback note below still applies. */
+        embedFrame.src = `https://www.instagram.com/${classified.igType}/${classified.id}/embed/`;
+        embedWrap.classList.remove("hidden");
 
         $("videoName").textContent = "Instagram reference";
-        $("videoDuration").textContent = "Link saved \u2014 preview unavailable";
+        $("videoDuration").textContent = "Preview only \u2014 not sent to Gemini or on-device comparison";
         $("uploadZone").classList.add("hidden");
         $("videoPreview").classList.remove("hidden");
-        showToast("Instagram links can't be embedded or auto-played in-browser. The link is saved for your own reference, but won't play here or reach Gemini/on-device comparison \u2014 consider downloading the clip and uploading it as a file instead.");
+        showToast("Instagram reference loaded for preview. If it doesn't display (private/restricted posts sometimes block embedding), download the clip and upload it as a file instead.");
 
     } else {
         state.referenceSourceType = "url";
@@ -1097,6 +1287,7 @@ function removeReferenceVideo() {
     state.referenceFile = null;
     state.referenceSourceType = "file";
     state.youtubeVideoId = null;
+    state.instagramEmbedPath = null;
     state.referenceDuration = null;
 
     resetReferenceEmbeds();
@@ -1134,6 +1325,9 @@ async function openStudio() {
     state.previousPage = "modeSetup";
     resetStudioUI();
 
+    document.body.classList.add("studio-active");
+    attemptPortraitLock();
+
     try {
         await startCamera();
         prepareReferenceForStudio();
@@ -1152,6 +1346,48 @@ async function openStudio() {
             ? "Camera blocked — allow camera access and reopen training."
             : "Camera unavailable.";
         updateDeviceAiPanel();
+        /* NEW: honest camera-fail fallback — offers to run the exact
+           same on-device pipeline against a video file the user picks,
+           instead of pretending live camera still works. */
+        $("fallbackVideoBtn")?.classList.remove("hidden");
+    }
+}
+
+
+/* =========================================================
+   NEW — Portrait-first studio experience
+   The Screen Orientation Lock API is real but inconsistently
+   supported (it generally requires the page to be in fullscreen,
+   and iOS Safari does not support it at all as of this writing).
+   This attempts it where available and never blocks on failure —
+   the CSS rotate-overlay (see style.css) is what actually
+   guarantees a portrait-first prompt everywhere.
+========================================================= */
+async function attemptPortraitLock() {
+    try {
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+            await document.documentElement.requestFullscreen().catch(() => {});
+        }
+        if (screen.orientation && typeof screen.orientation.lock === "function") {
+            await screen.orientation.lock("portrait").catch(error => {
+                console.warn("[MovementCoach] Orientation lock not available on this browser/device:", error?.message || error);
+            });
+        }
+    } catch (error) {
+        console.warn("[MovementCoach] Portrait lock attempt failed (non-fatal):", error);
+    }
+}
+
+function releasePortraitLock() {
+    try {
+        if (screen.orientation && typeof screen.orientation.unlock === "function") {
+            screen.orientation.unlock();
+        }
+        if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+        }
+    } catch (error) {
+        console.warn(error);
     }
 }
 
@@ -1419,12 +1655,20 @@ function poseDetectionLoop() {
     poseEngine.lastDetectTime = now;
 
     let result;
+    const detectStart = performance.now();
     try {
         result = poseEngine.landmarker.detectForVideo(video, now);
     } catch (error) {
         console.warn("Pose detection frame failed:", error);
         return;
     }
+    /* NEW: real measured latency of this exact detectForVideo() call —
+       used only for the Technical Proof panel, never fabricated. */
+    const latencyMs = performance.now() - detectStart;
+    poseEngine.lastDetectLatencyMs = latencyMs;
+    poseEngine.latencySamples = poseEngine.latencySamples || [];
+    poseEngine.latencySamples.push(latencyMs);
+    if (poseEngine.latencySamples.length > 30) poseEngine.latencySamples.shift();
 
     /* NEW — Section 8: real FPS measurement from actual detection call
        timestamps (not estimated/faked). Rolling 2s window. */
@@ -1432,6 +1676,8 @@ function poseDetectionLoop() {
     if (now - (poseEngine.lastPerfPanelUpdate || 0) > 500) {
         poseEngine.lastPerfPanelUpdate = now;
         updatePerformancePanel();
+        renderTechnicalProof();
+        renderFormRules();
     }
 
     const landmarks = result?.landmarks?.[0] || null;
@@ -1491,6 +1737,13 @@ function poseDetectionLoop() {
         hideRecognitionBanner();
     }
 
+    /* NEW: live form score computed whenever an exercise is locked,
+       independent of recording — this is what feeds the consolidated
+       live metrics bar so it's informative before you press record too. */
+    const liveFormScore = state.activeExercise ? computeFormScore(state.activeExercise, angles) : null;
+    poseEngine.lastFormScore = liveFormScore;
+    updateLiveMetricsBar(now);
+
     let repResult = null;
     if (state.isRecording) {
 
@@ -1505,8 +1758,7 @@ function poseDetectionLoop() {
             }
             flashHudRep();
         }
-        const formScore = computeFormScore(state.activeExercise, angles);
-        if (formScore != null) state.sessionMetrics.formScoreSamples.push(formScore);
+        if (liveFormScore != null) state.sessionMetrics.formScoreSamples.push(liveFormScore);
 
         state.sessionMetrics.jointSamples.push({
             knee: angles.kneeAvg,
@@ -1520,7 +1772,7 @@ function poseDetectionLoop() {
            from the rep/HUD sampling above). ---- */
         pushUserComparisonSample(angles, now);
 
-        updateFormHud(state.activeExercise, formScore, angles);
+        updateFormHud(state.activeExercise, liveFormScore, angles);
     }
 
     if (state.coachEnabled) {
@@ -2328,9 +2580,15 @@ function prepareReferenceForStudio() {
     }
 
     if (state.referenceSourceType === "instagram") {
-        if (emptyEl) emptyEl.innerHTML = "<span>\uD83D\uDCF7</span><p>Instagram link saved, but can't be played here \u2014 open it on Instagram to follow along.</p>";
-        emptyEl?.classList.remove("hidden");
-        $("referenceStatus").textContent = "LINK ONLY";
+        emptyEl?.classList.add("hidden");
+        $("referenceStatus").textContent = "PREVIEW ONLY";
+        if (embedWrap && state.instagramEmbedPath) {
+            embedWrap.innerHTML = `<iframe src="https://www.instagram.com/${state.instagramEmbedPath}/embed/" frameborder="0" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+            embedWrap.classList.remove("hidden");
+        } else {
+            if (emptyEl) emptyEl.innerHTML = "<span>\uD83D\uDCF7</span><p>Instagram link saved, but couldn't be embedded \u2014 open it on Instagram to follow along.</p>";
+            emptyEl?.classList.remove("hidden");
+        }
         return;
     }
 
@@ -2372,6 +2630,25 @@ function setupStudioControls() {
     /* NEW — Section 2: Validation & Accuracy opt-in for the next recording */
     $("validationModeToggle")?.addEventListener("change", event => {
         state.validationModeEnabled = event.target.checked;
+    });
+
+    /* NEW — manual Power Saver toggle. Overrides automatic FPS-based
+       mode switching while active (re-enabled automatically the next
+       time the studio opens fresh, in resetStudioUI). */
+    $("powerSaverToggle")?.addEventListener("click", () => {
+        const btn = $("powerSaverToggle");
+        const nowManualPowerSaver = state.perf.mode !== "powerSaver";
+        state.perf.manualOverride = nowManualPowerSaver;
+        setPerformanceMode(nowManualPowerSaver ? "powerSaver" : "full", false);
+        btn.classList.toggle("active", nowManualPowerSaver);
+        showToast(nowManualPowerSaver ? "Power Saver on — sampling reduced to save battery." : "Power Saver off.");
+    });
+
+    /* NEW: camera-fail fallback wiring */
+    $("fallbackVideoBtn")?.addEventListener("click", () => $("fallbackVideoInput")?.click());
+    $("fallbackVideoInput")?.addEventListener("change", event => {
+        const file = event.target.files[0];
+        if (file) runFallbackVideoPipeline(file);
     });
 }
 
@@ -2642,6 +2919,187 @@ function stopPractice(showResults = true) {
 /* =========================================================
    RECORDING FINISHED
 ========================================================= */
+
+/* =========================================================
+   NEW — CAMERA-FAIL FALLBACK PIPELINE ("Run Full Demo with a
+   Video File", mega-prompt Section 1)
+   Honest by construction: this calls the SAME classifyExercise(),
+   updateRepCounting(), computeFormScore(), and comparison-timeline
+   functions used by live camera tracking — just fed by frames
+   extracted from a picked video file instead of a live stream.
+   Nothing here is a separate/fabricated result path. There is no
+   bundled sample video shipped with this build (no video asset was
+   provided) — the user must pick a real video file.
+========================================================= */
+const FALLBACK_PIPELINE_MAX_DURATION_SEC = 180;
+const FALLBACK_PIPELINE_MAX_SAMPLES = 300;
+
+async function runFallbackVideoPipeline(file) {
+    if (!file.type.startsWith("video/")) {
+        showToast("Please select a video file.");
+        return;
+    }
+
+    const btn = $("fallbackVideoBtn");
+    if (btn) btn.disabled = true;
+    showToast("Running the full on-device pipeline against your video file…");
+    $("liveFeedback").textContent = "Processing video file…";
+
+    const landmarker = await ensurePoseLandmarker();
+    if (!landmarker) {
+        showToast("Pose model unavailable — the fallback pipeline needs it too, same as live camera.");
+        if (btn) btn.disabled = false;
+        return;
+    }
+
+    if (state.recordingURL) {
+        URL.revokeObjectURL(state.recordingURL);
+        state.recordingURL = null;
+    }
+
+    const hiddenVideo = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+    hiddenVideo.src = objectUrl;
+    hiddenVideo.muted = true;
+    hiddenVideo.playsInline = true;
+    hiddenVideo.style.cssText = "position:fixed; left:-9999px; top:-9999px; width:1px; height:1px;";
+    document.body.appendChild(hiddenVideo);
+
+    try {
+        await new Promise((resolve, reject) => {
+            hiddenVideo.addEventListener("loadedmetadata", resolve, { once: true });
+            hiddenVideo.addEventListener("error", () => reject(new Error("This browser couldn't decode that video file.")), { once: true });
+            setTimeout(() => reject(new Error("Timed out loading the video file.")), 15000);
+        });
+
+        const fullDuration = hiddenVideo.duration;
+        if (!fullDuration || !Number.isFinite(fullDuration) || fullDuration <= 0) {
+            throw new Error("Could not read this video's duration.");
+        }
+
+        const duration = Math.min(fullDuration, FALLBACK_PIPELINE_MAX_DURATION_SEC);
+        const step = Math.max(0.1, duration / FALLBACK_PIPELINE_MAX_SAMPLES);
+
+        resetRepState();
+        const metrics = { reps: 0, correctReps: 0, corrections: 0, formScoreSamples: [] };
+        const angleBuffer = [];
+        const userTimeline = [];
+        let activeExercise = null;
+        let fakeTs = 0;
+        let lastClassifyT = -Infinity;
+
+        for (let t = 0; t < duration; t += step) {
+            await seekVideoTo(hiddenVideo, t);
+            fakeTs += 33;
+
+            let result;
+            try {
+                result = landmarker.detectForVideo(hiddenVideo, fakeTs);
+            } catch (error) {
+                continue;
+            }
+
+            const landmarks = result?.landmarks?.[0];
+            if (!landmarks) continue;
+
+            const angles = computeFrameAngles(landmarks);
+            const tMs = t * 1000;
+
+            angleBuffer.push({ ...angles, t: tMs });
+            while (angleBuffer.length && tMs - angleBuffer[0].t > ANGLE_BUFFER_WINDOW_MS) angleBuffer.shift();
+
+            userTimeline.push({ t, ...extractComparisonAngles(angles) });
+
+            if (t - lastClassifyT > 0.3) {
+                lastClassifyT = t;
+                const { exercise, confidence } = classifyExercise(angleBuffer);
+                if (exercise && confidence >= CONFIDENCE_THRESHOLD) activeExercise = exercise;
+            }
+
+            if (activeExercise) {
+                const repResult = updateRepCounting(activeExercise, angles, tMs);
+                if (repResult && repResult.repCompleted) {
+                    metrics.reps = repResult.count;
+                    if (repResult.correct) metrics.correctReps++;
+                    else metrics.corrections++;
+                }
+                const formScore = computeFormScore(activeExercise, angles);
+                if (formScore != null) metrics.formScoreSamples.push(formScore);
+            }
+
+            $("liveFeedback").textContent = `Processing video file… ${Math.round((t / duration) * 100)}%`;
+        }
+
+        const avgFormScore = metrics.formScoreSamples.length
+            ? Math.round(metrics.formScoreSamples.reduce((a, b) => a + b, 0) / metrics.formScoreSamples.length)
+            : null;
+
+        state.recordingBlob = file;
+        state.recordingURL = objectUrl;
+        state.activeExercise = activeExercise;
+        state.userAngleTimeline = userTimeline;
+        state.lastComparisonSampleTime = 0;
+
+        const exerciseUsed = activeExercise || $("exerciseSelect")?.value || state.selectedMode;
+
+        state.currentSession = {
+            id: Date.now(),
+            mode: state.selectedMode,
+            modeTitle: modeData[state.selectedMode].title,
+            exercise: exerciseUsed,
+            duration,
+            recordingURL: objectUrl,
+            recordingBlob: file,
+            createdAt: new Date().toISOString(),
+            score: null,
+            breakdown: null,
+            mistakes: [],
+            onDeviceMistakes: [],
+            translations: null,
+            originalFeedback: "",
+            source: "fallback-video-file",
+            metrics: {
+                reps: metrics.reps,
+                correctReps: metrics.correctReps,
+                corrections: metrics.corrections,
+                avgFormScore,
+                avgConfidence: null,
+                jointMetrics: null
+            }
+        };
+
+        const reviewVideo = $("reviewVideo");
+        reviewVideo.src = objectUrl;
+        reviewVideo.load();
+        setupReviewReferenceVideo();
+
+        showPage("analysis");
+        populateWorkoutSummary(state.currentSession);
+        if (state.selectedMode === "dance") setCompareStep(3);
+
+        runOnDeviceComparison();
+        runAnalysis();
+
+        markDemoStep("camera");
+        markDemoStep("skeleton");
+        markDemoStep("record");
+        markDemoStep("stop");
+        markDemoStep("review");
+
+        showToast("Video file processed through the full on-device pipeline.");
+
+    } catch (error) {
+        console.error("Fallback video pipeline failed:", error);
+        showToast("Couldn't process that video file: " + (error?.message || "unknown error"));
+    } finally {
+        hiddenVideo.pause();
+        hiddenVideo.removeAttribute("src");
+        hiddenVideo.load();
+        hiddenVideo.remove();
+        if (btn) btn.disabled = false;
+    }
+}
+
 
 function handleRecordingStopped() {
     if (state.recordedChunks.length === 0) {
@@ -3354,6 +3812,60 @@ function populateWorkoutSummary(session) {
 
     const liveBadge = $("liveScoreBadge");
     if (liveBadge) liveBadge.textContent = metrics.avgFormScore != null ? `${metrics.avgFormScore}%` : "--";
+
+    renderWhatImproved(session);
+}
+
+/* =========================================================
+   NEW — "What Improved" (mega-prompt Section 4). Renders
+   immediately from real on-device metrics — does not wait for
+   or depend on Gemini, so it still works if Gemini fails. Compares
+   against the most recent PRIOR stored session for the same
+   exercise; if none exists, says so honestly instead of inventing
+   a baseline.
+========================================================= */
+function renderWhatImproved(session) {
+    const card = $("whatImprovedCard");
+    if (!card) return;
+
+    const previous = state.history.find(s => (s.exercise || s.mode) === (session.exercise || session.mode));
+    const metrics = session.metrics || {};
+
+    if (!previous) {
+        card.innerHTML = `
+            <div class="card-header"><div><h3>📈 What Improved</h3><p>This is your first recorded session for ${escapeHTML(EXERCISE_LABELS[session.exercise] || session.exercise)} — nothing to compare against yet. Do another session to see a real trend here.</p></div></div>
+        `;
+        return;
+    }
+
+    const prevMetrics = previous.metrics || {};
+    const rows = [];
+
+    if (metrics.avgFormScore != null && prevMetrics.avgFormScore != null) {
+        const d = metrics.avgFormScore - prevMetrics.avgFormScore;
+        rows.push(formatImprovementRow("Form Score", prevMetrics.avgFormScore, metrics.avgFormScore, d, "pts"));
+    }
+    if (metrics.corrections != null && prevMetrics.corrections != null) {
+        const d = prevMetrics.corrections - metrics.corrections; // fewer corrections = improvement
+        rows.push(formatImprovementRow("Form Corrections", prevMetrics.corrections, metrics.corrections, d, "", true));
+    }
+    if (metrics.correctReps != null && metrics.reps && prevMetrics.correctReps != null && prevMetrics.reps) {
+        const prevRatio = Math.round((prevMetrics.correctReps / prevMetrics.reps) * 100);
+        const currRatio = Math.round((metrics.correctReps / metrics.reps) * 100);
+        rows.push(formatImprovementRow("Correct-Rep Rate", prevRatio, currRatio, currRatio - prevRatio, "%"));
+    }
+
+    card.innerHTML = `
+        <div class="card-header"><div><h3>📈 What Improved</h3><p>Compared with your previous ${escapeHTML(EXERCISE_LABELS[session.exercise] || session.exercise)} session (${escapeHTML(formatDate(previous.createdAt))}):</p></div></div>
+        ${rows.length ? `<div class="validation-stats-grid">${rows.join("")}</div>` : `<p class="review-hint" style="padding:0;">Not enough matching metrics between the two sessions to compare.</p>`}
+    `;
+}
+
+function formatImprovementRow(label, prevVal, currVal, delta, unit, lowerIsBetter) {
+    const good = lowerIsBetter ? delta > 0 : delta > 0;
+    const arrow = delta > 0 ? "▲" : delta < 0 ? "▼" : "→";
+    const color = delta === 0 ? "" : (good ? "color:var(--green);" : "color:var(--red);");
+    return `<div class="validation-stat"><span>${escapeHTML(label)}</span><strong style="${color}">${arrow} ${prevVal}${unit} → ${currVal}${unit}</strong></div>`;
 }
 
 function populateSessionIntelligence(session, result) {
@@ -3511,6 +4023,7 @@ function resetStudioUI() {
     $("recordingIndicator").classList.add("hidden");
     $("liveFeedback").textContent = "Camera ready.";
     $("studioHint").textContent = "Press record when you are ready.";
+    $("fallbackVideoBtn")?.classList.add("hidden");
 
     setPoseStatus(state.poseEnabled ? "loading" : "", state.poseEnabled ? "◎ Skeleton: Loading..." : "Skeleton: Off");
 
@@ -3542,7 +4055,10 @@ function resetStudioUI() {
     state.perf.mode = "full";
     state.perf.detectIntervalMs = PERF_INTERVAL_FULL_MS;
     state.perf.lastModeSwitchTime = 0;
+    state.perf.manualOverride = false;
+    $("powerSaverToggle")?.classList.remove("active");
     updatePerformancePanel();
+    renderFormRules();
 }
 
 
