@@ -3,4 +3,4 @@ node_modules/
 .env
 uploads/
 *.log
-"@ | Set-Content .gitignore
+"@ | Set-Content .gitignore.env
