@@ -137,10 +137,9 @@ const state = {
 ========================================================= */
 
 const POSE_VISION_MODULE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-const POSE_WASM_BASE_URL_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const POSE_WASM_BASE_URL_LOCAL = "/assets/mediapipe/wasm";
-const POSE_MODEL_URL_CDN = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
-const POSE_MODEL_URL_LOCAL = "/assets/mediapipe/pose_landmarker_lite.task";
+const POSE_WASM_BASE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const POSE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
 const POSE_LANDMARKS = {
     NOSE: 0,
     LEFT_SHOULDER: 11, RIGHT_SHOULDER: 12,
@@ -687,7 +686,7 @@ function phrase(key, language, ...args) {
 const modeData = {
 
     dance: {
-        title: "Pysio", icon: " 🦴 ",
+        title: "Dance", icon: "💃",
         description: "Compare your movement with a teacher or choreography reference.",
         reference: true, trackable: false,
         doList: ["Warm up for a minute before starting.", "Keep your movements relaxed and controlled.", "Watch the reference video once before recording."],
@@ -2025,34 +2024,6 @@ function computeFrameAngles(landmarks) {
 /* NEW: reduces a full computeFrameAngles() result down to the compact
    set of scalar values the reference-comparison engine actually needs,
    dropping raw landmark points to keep both timelines small in memory. */
-   let lastAngleSnapshot = null;
-let lastAngleSnapshotTime = 0;
-
-function computeAngularVelocity(currentAngles, now) {
-    if (!lastAngleSnapshot) { lastAngleSnapshot = currentAngles; lastAngleSnapshotTime = now; return null; }
-    const dt = (now - lastAngleSnapshotTime) / 1000;
-    if (dt <= 0) return null;
-    const dTheta = Math.abs((currentAngles.elbowAvg ?? 0) - (lastAngleSnapshot.elbowAvg ?? 0));
-    lastAngleSnapshot = currentAngles;
-    lastAngleSnapshotTime = now;
-    return Math.round((dTheta / dt) * 10) / 10; // °/s
-}
-
-function computeRULA(angles) {
-    // Simplified upper-limb RULA subset: upper arm + neck flexion bands
-    let score = 1;
-    if (angles.backAngle != null) {
-        if (angles.backAngle > 20) score += 1;
-        if (angles.backAngle > 45) score += 2;
-    }
-    if (angles.leftShoulderAngle != null || angles.rightShoulderAngle != null) {
-        const shoulder = Math.max(angles.leftShoulderAngle ?? 0, angles.rightShoulderAngle ?? 0);
-        if (shoulder > 45) score += 1;
-        if (shoulder > 90) score += 2;
-    }
-    const risk = score <= 2 ? "green" : score <= 4 ? "yellow" : "red";
-    return { score, risk };
-}
 function extractComparisonAngles(angles) {
     return {
         leftShoulderAngle: angles.leftShoulderAngle,
