@@ -1,4 +1,4 @@
-const API_BASE_URL = "https://movement-detector-ai.onrender.com";
+const API_BASE_URL = "https://posture-detector-4.onrender.com";
 /* =========================================================
    AI MOVEMENT COACH — FRONTEND CONTROLLER
    (original app logic preserved; NEW sections are marked)
