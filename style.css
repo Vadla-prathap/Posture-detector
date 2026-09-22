@@ -826,3 +826,21 @@ body.studio-active .on-device-badge { display: flex; }
         transition-duration: 0.01ms !important;
     }
 }
+.rula-green { color: var(--green); }
+.rula-yellow { color: var(--yellow); }
+.rula-red { color: var(--red); }
+
+.calibration-overlay {
+    display: none; position: fixed; inset: 0; z-index: 210;
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(6px);
+    flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px;
+}
+.calibration-overlay:not(.hidden) { display: flex; }
+.calibration-overlay strong { font-size: 90px; color: var(--accent); }
+.calibration-overlay p { color: var(--muted); max-width: 320px; }
+
+@media print {
+    .sidebar, .mobile-header, .chat-fab, .chat-panel, .on-device-badge, .demo-overlay, button { display: none !important; }
+    .main { margin-left: 0 !important; width: 100% !important; }
+    #clinicalReportCard { border: 1px solid #000; color: #000; background: #fff; }
+}
